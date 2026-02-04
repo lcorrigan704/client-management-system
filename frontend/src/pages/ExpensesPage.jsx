@@ -1,0 +1,190 @@
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { DataTable } from "@/components/data-table";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { DatePicker } from "@/components/date-picker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { fieldClass, gridTwo, labelClass } from "@/ui/formStyles";
+import { formatGBP } from "@/utils/format";
+
+export default function ExpensesPage({
+  expenses,
+  clients,
+  users,
+  expenseColumns,
+  expenseDialogOpen,
+  setExpenseDialogOpen,
+  expenseForm,
+  setExpenseForm,
+  editingExpenseId,
+  resetExpenseForm,
+  handleExpenseSubmit,
+}) {
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground">Expenses</h2>
+          <p className="text-sm text-muted-foreground">
+            Track client-related or standalone expenses.
+          </p>
+        </div>
+        <Button
+          onClick={() => {
+            resetExpenseForm();
+            setExpenseDialogOpen(true);
+          }}
+        >
+          New expense
+        </Button>
+      </div>
+      <Card>
+        <CardContent className="pt-6">
+
+          <DataTable
+            columns={expenseColumns}
+            data={expenses}
+            emptyMessage="No expenses yet."
+            searchKey="title"
+            searchPlaceholder="Search expenses..."
+            totalKey="amount"
+            totalLabel="Total expenses"
+            formatTotal={formatGBP}
+          />
+        </CardContent>
+      </Card>
+
+      <Dialog open={expenseDialogOpen} onOpenChange={setExpenseDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingExpenseId ? "Edit expense" : "New expense"}</DialogTitle>
+            <DialogDescription>Attach to a client or leave standalone.</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleExpenseSubmit}>
+            <div className={fieldClass}>
+              <label className={labelClass}>Client (optional)</label>
+              <Select
+                value={expenseForm.client_id}
+                onValueChange={(value) =>
+                  setExpenseForm({ ...expenseForm, client_id: value === "none" ? "" : value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No client</SelectItem>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={String(client.id)}>
+                      {client.company || client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className={fieldClass}>
+              <label className={labelClass}>User (optional)</label>
+              <Select
+                value={expenseForm.user_id}
+                onValueChange={(value) =>
+                  setExpenseForm({ ...expenseForm, user_id: value === "none" ? "" : value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select user" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No user</SelectItem>
+                  {users.map((person) => (
+                    <SelectItem key={person.id} value={String(person.id)}>
+                      {person.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className={gridTwo}>
+              <div className={fieldClass}>
+                <label className={labelClass}>Use custom ID</label>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={expenseForm.is_legacy}
+                    onChange={(event) =>
+                      setExpenseForm({ ...expenseForm, is_legacy: event.target.checked })
+                    }
+                  />
+                  Override auto-generated ID
+                </label>
+              </div>
+              <div className={fieldClass}>
+                <label className={labelClass}>Custom ID</label>
+                <Input
+                  value={expenseForm.display_id}
+                  onChange={(event) =>
+                    setExpenseForm({ ...expenseForm, display_id: event.target.value })
+                  }
+                  placeholder="EXP-1001"
+                  disabled={!expenseForm.is_legacy}
+                />
+              </div>
+            </div>
+            <div className={gridTwo}>
+              <div className={fieldClass}>
+                <label className={labelClass}>Title</label>
+                <Input
+                  value={expenseForm.title}
+                  onChange={(event) => setExpenseForm({ ...expenseForm, title: event.target.value })}
+                  required
+                />
+              </div>
+              <div className={fieldClass}>
+                <label className={labelClass}>Amount</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={expenseForm.amount}
+                  onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })}
+                  required
+                />
+              </div>
+              <div className={fieldClass}>
+                <label className={labelClass}>Incurred date</label>
+                <DatePicker
+                  value={expenseForm.incurred_date}
+                  onChange={(date) => setExpenseForm({ ...expenseForm, incurred_date: date })}
+                  placeholder="Pick a date"
+                />
+              </div>
+            </div>
+            <div className={fieldClass}>
+              <label className={labelClass}>Notes</label>
+              <Textarea
+                value={expenseForm.notes}
+                onChange={(event) => setExpenseForm({ ...expenseForm, notes: event.target.value })}
+              />
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline" onClick={resetExpenseForm}>
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button type="submit">{editingExpenseId ? "Update expense" : "Create expense"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}

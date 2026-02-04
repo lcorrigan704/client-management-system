@@ -1,0 +1,136 @@
+const emptyClient = {
+  name: "",
+  contact_name: "",
+  email: "",
+  contact_email: "",
+  phone: "",
+  contact_phone: "",
+  company: "",
+  website: "",
+  invoice_email: "",
+  address: "",
+};
+
+const emptyInvoice = {
+  client_id: "",
+  display_id: "",
+  is_legacy: false,
+  title: "",
+  status: "draft",
+  due_date: null,
+  notes: "",
+  line_items: [{ description: "", quantity: 1, unit_amount: "" }],
+};
+
+const emptyQuote = {
+  client_id: "",
+  display_id: "",
+  is_legacy: false,
+  title: "",
+  status: "draft",
+  valid_until: null,
+  notes: "",
+  line_items: [{ description: "", quantity: 1, unit_amount: "" }],
+};
+
+const emptyAgreement = {
+  client_id: "",
+  display_id: "",
+  quote_id: "",
+  title: "",
+  start_date: null,
+  end_date: null,
+  scope_of_services: "",
+  duration: "",
+  availability: "",
+  meetings: "",
+  access_requirements: "",
+  fees_payments: "",
+  data_protection: "",
+  termination: "",
+  company_signatory_name: "",
+  company_signatory_title: "",
+  company_signed_date: null,
+  client_signatory_name: "",
+  sla_items: [{ sla: "", timescale: "" }],
+};
+
+const emptyProposal = {
+  client_id: "",
+  display_id: "",
+  quote_id: "",
+  title: "",
+  status: "draft",
+  submitted_on: null,
+  valid_until: null,
+  summary: "",
+  approach: "",
+  timeline: "",
+  content: "",
+  requirements: [{ description: "" }],
+  attachments: [],
+};
+
+const emptyExpense = {
+  client_id: "",
+  user_id: "",
+  display_id: "",
+  is_legacy: false,
+  title: "",
+  amount: "",
+  incurred_date: null,
+  notes: "",
+};
+
+const emptyEmailDraft = {
+  entity_type: "invoice",
+  entity_id: "",
+  client_id: "",
+  to_email: "",
+  send: false,
+};
+
+const defaultSettings = {
+  company_name: "Your Company",
+  company_address: "",
+  company_invoice_email: "",
+  invoice_prefix: "INV",
+  quote_prefix: "QUOTE",
+  proposal_prefix: "PROP",
+  agreement_prefix: "AGR",
+  expense_prefix: "EXP",
+  fy_start_month: 1,
+  fy_start_day: 1,
+  fy_end_month: 12,
+  fy_end_day: 31,
+  accounts_due_month: 10,
+  accounts_due_day: 31,
+  confirmation_date_month: 1,
+  confirmation_date_day: 27,
+  confirmation_due_month: 2,
+  confirmation_due_day: 10,
+  smtp_host: "",
+  smtp_port: 587,
+  smtp_username: "",
+  smtp_password: "",
+  smtp_from: "",
+  smtp_use_tls: true,
+  bank_name: "",
+  bank_account_name: "",
+  bank_account_number: "",
+  bank_sort_code: "",
+  bank_iban: "",
+  bank_swift: "",
+  bank_reference: "",
+};
+
+export {
+  emptyClient,
+  emptyInvoice,
+  emptyQuote,
+  emptyAgreement,
+  emptyProposal,
+  emptyExpense,
+  emptyEmailDraft,
+  defaultSettings,
+};

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Expense</title>
+    <link rel="stylesheet" href="invoice.css" />
+    <style>
+      :root {
+        --accent: #c2410c;
+        --accent-soft: #ffedd5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="invoice">
+      <div class="accent-line"></div>
+      <div class="header">
+        <div class="brand">
+          <h1>{{ company_name }}</h1>
+          <p>{{ company_address | replace('\n', '<br/>') | safe }}</p>
+        </div>
+        <div class="doc-title">
+          <h2>Expense</h2>
+          <div class="doc-id">{{ expense_id }}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="kv-grid">
+          <div class="kv">
+            <span>Date incurred</span>
+            <strong>{{ incurred_date }}</strong>
+          </div>
+          <div class="kv">
+            <span>For</span>
+            <strong>{{ client_company }}</strong>
+          </div>
+          <div class="kv">
+            <span>Total</span>
+            <strong>{{ total }}</strong>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div class="meta-card">
+            <h3>Expense detail</h3>
+            <p>{{ expense_title }}</p>
+          </div>
+          <div class="meta-card">
+            <h3>Notes</h3>
+            <p>{{ notes }}</p>
+          </div>
+        </div>
+
+        <div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="amount">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{{ expense_title }}</td>
+                <td class="amount">{{ total }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="bank">
+          <strong>Recorded for</strong><br />
+          {{ client_company or "Internal" }}
+        </div>
+        <div class="bank">
+          <strong>Payment details</strong><br />
+          {{ bank_details | safe }}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

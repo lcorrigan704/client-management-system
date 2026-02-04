@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Proposal</title>
+    <link rel="stylesheet" href="proposal.css" />
+    <style>
+      :root {
+        --accent: #7c3aed;
+        --accent-soft: #ede9fe;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="proposal">
+      <div class="accent-line"></div>
+      <div class="header">
+        <div class="brand">
+          <h1>{{ company_name }}</h1>
+          <p>{{ company_address | replace('\n', '<br/>') | safe }}</p>
+        </div>
+        <div class="doc-title">
+          <h2>Proposal</h2>
+          <div class="doc-id">{{ proposal_id }}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="kv-grid">
+          <div class="kv">
+            <span>Submitted on</span>
+            <strong>{{ submitted_on }}</strong>
+          </div>
+          <div class="kv">
+            <span>Valid until</span>
+            <strong>{{ valid_until }}</strong>
+          </div>
+          <div class="kv">
+            <span>Quote reference</span>
+            <strong>{{ quote_id }}</strong>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div class="meta-card">
+            <h3>For</h3>
+            <p>
+              <strong>{{ client_company }}</strong><br />
+              {{ client_name }}<br />
+              {{ client_address | replace('\n', '<br/>') | safe }}
+            </p>
+          </div>
+          <div class="meta-card">
+            <h3>Project</h3>
+            <p><strong>{{ project_title }}</strong></p>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Summary</h3>
+          <p>{{ summary | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Approach</h3>
+          <p>{{ approach | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Requirements</h3>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in requirements %}
+              <tr>
+                <td>{{ item.description }}</td>
+              </tr>
+              {% endfor %}
+              {% if requirements|length == 0 %}
+              <tr>
+                <td>No requirements listed.</td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-block">
+          <h3>Timeline</h3>
+          <p>{{ timeline | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Quote breakdown</h3>
+          {% if quote_line_items|length > 0 %}
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="amount">Qty</th>
+                <th class="amount">Unit</th>
+                <th class="amount">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line_item in quote_line_items %}
+              <tr>
+                <td>{{ line_item.description }}</td>
+                <td class="amount">{{ line_item.quantity }}</td>
+                <td class="amount">{{ line_item.unit_amount }}</td>
+                <td class="amount">{{ line_item.line_total }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+          <div class="payment-note">
+            <strong>Total:</strong> {{ quote_total }}
+          </div>
+        </div>
+
+        {% if attachments|length > 0 %}
+        <div class="section-block">
+          <h3>Supporting documentation</h3>
+          <div class="attachments">
+            {% for attachment in attachments %}
+            <div class="attachment">
+              <img src="{{ attachment.file_path }}" alt="{{ attachment.filename }}" />
+              <p>{{ attachment.filename }}</p>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>

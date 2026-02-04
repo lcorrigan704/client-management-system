@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Service Agreement</title>
+    <link rel="stylesheet" href="agreement.css" />
+    <style>
+      :root {
+        --accent: #16a34a;
+        --accent-soft: #dcfce7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="agreement">
+      <div class="accent-line"></div>
+      <div class="header">
+        <div class="brand">
+          <h1>{{ company_name }}</h1>
+          <p>{{ company_address | replace('\n', '<br/>') | safe }}</p>
+        </div>
+        <div class="doc-title">
+          <h2>Service Agreement</h2>
+          <div class="doc-id">{{ agreement_id }}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="party-block">
+          <h3>This Service Agreement is between</h3>
+          <p>
+            <strong>{{ company_name }}</strong> ("Service Provider") and
+            <strong>{{ client_company }}</strong> ("Client").
+          </p>
+          <div class="party-grid">
+            <div>
+              <span>Service Provider</span>
+              <p>{{ company_address | replace('\n', '<br/>') | safe }}</p>
+            </div>
+            <div>
+              <span>Client</span>
+              <p>{{ client_company }}<br />{{ client_address | replace('\n', '<br/>') | safe }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="kv-grid">
+          <div class="kv">
+            <span>Start date</span>
+            <strong>{{ start_date }}</strong>
+          </div>
+          <div class="kv">
+            <span>End date</span>
+            <strong>{{ end_date }}</strong>
+          </div>
+          <div class="kv">
+            <span>Quote reference</span>
+            <strong>{{ quote_id }}</strong>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Scope of services</h3>
+          <p>{{ scope_of_services | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-grid">
+          <div class="section-block">
+            <h3>Duration</h3>
+            <p>{{ duration | replace('\n', '<br/>') | safe }}</p>
+          </div>
+          <div class="section-block">
+            <h3>Availability</h3>
+            <p>{{ availability | replace('\n', '<br/>') | safe }}</p>
+          </div>
+          <div class="section-block">
+            <h3>Meetings</h3>
+            <p>{{ meetings | replace('\n', '<br/>') | safe }}</p>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Service Level Agreements (SLAs)</h3>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>SLA</th>
+                <th>Timescale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in sla_items %}
+              <tr>
+                <td>{{ item.sla }}</td>
+                <td>{{ item.timescale }}</td>
+              </tr>
+              {% endfor %}
+              {% if sla_items|length == 0 %}
+              <tr>
+                <td colspan="2">No SLA items added.</td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-block">
+          <h3>Access requirements</h3>
+          <p>{{ access_requirements | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Fees and payments</h3>
+          <p>{{ fees_payments | replace('\n', '<br/>') | safe }}</p>
+          {% if quote_line_items|length > 0 %}
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="amount">Qty</th>
+                <th class="amount">Unit</th>
+                <th class="amount">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line_item in quote_line_items %}
+              <tr>
+                <td>{{ line_item.description }}</td>
+                <td class="amount">{{ line_item.quantity }}</td>
+                <td class="amount">{{ line_item.unit_amount }}</td>
+                <td class="amount">{{ line_item.line_total }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+          <div class="payment-note">
+            <strong>Quote total:</strong> {{ quote_total }}
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Data protection</h3>
+          <p>{{ data_protection | replace('\n', '<br/>') | safe }}</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Termination</h3>
+          <p>{{ termination | replace('\n', '<br/>') | safe }}</p>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="bank">
+          <strong>Payment details</strong><br />
+          {{ bank_details | safe }}<br />
+          Reference: {{ agreement_id }}
+        </div>
+        <div class="bank">
+          <strong>Signatures</strong>
+          <div class="signature-grid">
+            <div class="signature-card">
+              <span>For {{ company_name }}</span>
+              <p>Name: {{ company_signatory_name }}</p>
+              <p>Title: {{ company_signatory_title }}</p>
+              <p>Date: {{ company_signed_date }}</p>
+            </div>
+            <div class="signature-card">
+              <span>For {{ client_company }}</span>
+              <p>Name: {{ client_signatory_name }}</p>
+              <p>Date: __________________</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

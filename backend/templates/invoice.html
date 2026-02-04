@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Invoice</title>
+    <link rel="stylesheet" href="invoice.css" />
+    <style>
+      :root {
+        --accent: #2563eb;
+        --accent-soft: #dbeafe;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="invoice">
+      <div class="accent-line"></div>
+      <div class="header">
+        <div class="brand">
+          <h1>{{ company_name }}</h1>
+          <p>{{ company_address | replace('\n', '<br/>') | safe }}</p>
+        </div>
+        <div class="doc-title">
+          <h2>Invoice</h2>
+          <div class="doc-id">{{ invoice_id }}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="kv-grid">
+          <div class="kv">
+            <span>Issue date</span>
+            <strong>{{ issued_date }}</strong>
+          </div>
+          <div class="kv">
+            <span>Due date</span>
+            <strong>{{ due_date }}</strong>
+          </div>
+          <div class="kv">
+            <span>Total due</span>
+            <strong>{{ total }}</strong>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div class="meta-card">
+            <h3>For</h3>
+            <p>
+              <strong>{{ client_company }}</strong><br />
+              {{ client_name }}<br />
+              {{ client_email }}<br />
+              {{ client_address }}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="amount">Qty</th>
+                <th class="amount">Unit</th>
+                <th class="amount">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line_item in line_items %}
+              <tr>
+                <td>{{ line_item.description }}</td>
+                <td class="amount">{{ line_item.quantity }}</td>
+                <td class="amount">{{ line_item.unit_amount }}</td>
+                <td class="amount">{{ line_item.line_total }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="totals-box">
+              <div class="row total">
+                <span>Total</span>
+                <span>{{ total }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {% if notes %}
+        <div class="notes">{{ notes }}</div>
+        {% endif %}
+      </div>
+
+      <div class="footer">
+        <div class="bank">
+          <strong>Payment details</strong><br />
+          {{ bank_details | safe }}<br />
+          Reference: {{ invoice_id }}
+        </div>
+        <div class="bank">
+          <strong>Contact</strong><br />
+          {{ company_invoice_email }}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

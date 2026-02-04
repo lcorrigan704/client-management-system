@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - DATABASE_URL=sqlite:////data/app.db
+      - APP_SECRET=change-me
+      - ALLOWED_ORIGINS=http://localhost:5173
+    volumes:
+      - ./backend/public/uploads:/app/public/uploads
+      - ./backend/data:/data
+    ports:
+      - "8000:8000"
