@@ -192,6 +192,12 @@ This removes `backend/app.db` and clears `backend/public/uploads`.
 - Passwords are hashed with Argon2.
 - SMTP passwords are encrypted at rest using `APP_SECRET`.
 - Set `APP_SECRET` in `backend/.env` before first run; changing it later will invalidate stored SMTP credentials and sessions.
+- `SESSION_SECURE` must be `true` behind HTTPS.
+- `APP_SECRET` strength is user‑set; weak secrets weaken SMTP encryption at rest.
+- No account lockout or MFA (expected for MVP; add these for public deployments).
+- You can disable API docs in production via `ENABLE_DOCS=false`.
+- Login rate limiting is configurable via `LOGIN_RATE_LIMIT_ATTEMPTS` and `LOGIN_RATE_LIMIT_WINDOW_SECONDS`.
+- Upload size limits are configurable via `MAX_UPLOAD_MB` (also enforce at your reverse proxy).
 
 ## Backups
 Preferred: run the helper script:

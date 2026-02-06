@@ -12,6 +12,10 @@ class Settings:
     session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "72"))
     session_secure: bool = os.getenv("SESSION_SECURE", "false").lower() == "true"
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+    enable_docs: bool = os.getenv("ENABLE_DOCS", "true").lower() == "true"
+    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
+    login_rate_limit_attempts: int = int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "10"))
+    login_rate_limit_window_seconds: int = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900"))
     smtp_host: str | None = os.getenv("SMTP_HOST") or None
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
     smtp_username: str | None = os.getenv("SMTP_USERNAME") or None
