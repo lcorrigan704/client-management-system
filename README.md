@@ -214,7 +214,3 @@ If you use Docker, back up `backend/data/app.db` instead.
 ## License and warranty
 This project is open-source and provided “as is”, without warranty of any kind. Use at your own risk.
 
-## Repository setup notes
-- Enable branch protection on `main` (require PR reviews + status checks).
-- Enforce signed commits if desired.
-- Add CODEOWNERS if you want review routing.
