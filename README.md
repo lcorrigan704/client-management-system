@@ -210,7 +210,7 @@ Manual alternative (SQLite DB + uploads directory):
 tar -czf backups/cms-$(date +%F).tar.gz backend/app.db backend/public/uploads
 ```
 If you use Docker, back up `backend/data/app.db` instead.
+Backups include proposal attachments and expense receipts stored in `backend/public/uploads`.
 
 ## License and warranty
 This project is open-source and provided “as is”, without warranty of any kind. Use at your own risk.
-

@@ -247,6 +247,22 @@ class Expense(Base):
 
     client: Mapped["Client"] = relationship("Client", back_populates="expenses")
     user: Mapped["User"] = relationship("User", back_populates="expenses")
+    receipts: Mapped[list["ExpenseReceipt"]] = relationship(
+        "ExpenseReceipt", back_populates="expense", cascade="all, delete-orphan"
+    )
+
+
+class ExpenseReceipt(Base):
+    __tablename__ = "expense_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    expense_id: Mapped[int] = mapped_column(
+        ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(300), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    expense: Mapped["Expense"] = relationship("Expense", back_populates="receipts")
 
 
 class Settings(Base):

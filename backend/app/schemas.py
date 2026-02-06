@@ -281,9 +281,21 @@ class ExpenseBase(BaseModel):
     user_id: Optional[int] = None
 
 
+class ExpenseReceiptItem(BaseModel):
+    filename: str
+    file_path: str
+
+
+class ExpenseReceiptOut(ExpenseReceiptItem):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ExpenseCreate(ExpenseBase):
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
+    receipts: Optional[list[ExpenseReceiptItem]] = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -295,6 +307,7 @@ class ExpenseUpdate(BaseModel):
     user_id: Optional[int] = None
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
+    receipts: Optional[list[ExpenseReceiptItem]] = None
 
 
 class ExpenseOut(ExpenseBase):
@@ -304,6 +317,7 @@ class ExpenseOut(ExpenseBase):
     client_id: Optional[int] = None
     user_id: Optional[int] = None
     created_at: datetime
+    receipts: list[ExpenseReceiptOut] = []
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -90,6 +90,11 @@ const api = {
     files.forEach((file) => formData.append("files", file));
     return requestForm("/proposals/uploads", formData);
   },
+  uploadExpenseReceipts: (files) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    return requestForm("/expenses/uploads", formData);
+  },
   createExpense: (payload) =>
     request("/expenses", { method: "POST", body: JSON.stringify(payload) }),
   createClientExpense: (clientId, payload) =>

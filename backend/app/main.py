@@ -133,7 +133,7 @@ if settings.enable_docs:
 @app.middleware("http")
 async def upload_size_limit(request: Request, call_next):
     if request.method in {"POST", "PUT"}:
-        if request.url.path in {"/proposals/uploads", "/admin/restore/upload"}:
+        if request.url.path in {"/proposals/uploads", "/admin/restore/upload", "/expenses/uploads"}:
             content_length = request.headers.get("content-length")
             if content_length and int(content_length) > MAX_UPLOAD_BYTES:
                 return JSONResponse(status_code=413, content={"detail": "Upload exceeds size limit."})
@@ -255,6 +255,7 @@ def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_rol
 
 @app.post("/admin/reset")
 def reset_data(db: Session = Depends(get_db), user=Depends(require_role(["owner", "admin"]))):
+    db.query(models.ExpenseReceipt).delete()
     db.query(models.ProposalAttachment).delete()
     db.query(models.ProposalRequirement).delete()
     db.query(models.ServiceAgreementSLA).delete()
@@ -656,6 +657,27 @@ def upload_proposal_assets(files: list[UploadFile] = File(...)):
         suffix = Path(uploaded.filename).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
             raise HTTPException(status_code=400, detail="Only image files are supported.")
+        filename = f"{uuid4().hex}{suffix}"
+        destination = UPLOADS_DIR / filename
+        _save_upload_limited(uploaded, destination, MAX_UPLOAD_BYTES)
+        saved.append(
+            {
+                "filename": uploaded.filename,
+                "file_path": f"uploads/{filename}",
+            }
+        )
+    return {"files": saved}
+
+
+@app.post("/expenses/uploads")
+def upload_expense_receipts(files: list[UploadFile] = File(...)):
+    saved = []
+    for uploaded in files:
+        if not uploaded.filename:
+            continue
+        suffix = Path(uploaded.filename).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".pdf"}:
+            raise HTTPException(status_code=400, detail="Only PDF or image files are supported.")
         filename = f"{uuid4().hex}{suffix}"
         destination = UPLOADS_DIR / filename
         _save_upload_limited(uploaded, destination, MAX_UPLOAD_BYTES)
