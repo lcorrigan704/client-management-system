@@ -175,6 +175,20 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
     line_items = data.pop("line_items", None)
     display_id = (data.pop("display_id", None) or "").strip()
     is_legacy = data.pop("is_legacy", None)
+    quote_id = data.get("quote_id")
+    if quote_id:
+        quote = db.query(models.Quote).filter(models.Quote.id == quote_id).first()
+        if not quote or quote.client_id != client_id:
+            raise ValueError("Selected quote does not belong to this client.")
+        if not line_items:
+            line_items = [
+                {
+                    "description": item.description,
+                    "quantity": float(item.quantity),
+                    "unit_amount": float(item.unit_amount),
+                }
+                for item in quote.line_items
+            ]
     invoice = models.Invoice(client_id=client_id, **data)
     db.add(invoice)
     db.commit()
@@ -210,6 +224,13 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
 def update_invoice(db: Session, invoice: models.Invoice, payload: schemas.InvoiceUpdate):
     data = payload.model_dump(exclude_unset=True)
     line_items = data.pop("line_items", None)
+    if "quote_id" in data:
+        quote_id = data.pop("quote_id")
+        if quote_id:
+            quote = db.query(models.Quote).filter(models.Quote.id == quote_id).first()
+            if not quote or quote.client_id != invoice.client_id:
+                raise ValueError("Selected quote does not belong to this client.")
+        setattr(invoice, "quote_id", quote_id)
     if "display_id" in data:
         display_id = (data.pop("display_id") or "").strip()
         if display_id:

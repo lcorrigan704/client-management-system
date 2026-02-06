@@ -7,6 +7,8 @@ backend/.venv/
 backend/app.db
 backend/public/uploads/
 backend/data/
+backups/
+*.tar.gz
 __pycache__/
 *.pyc
 .DS_Store

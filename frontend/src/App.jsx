@@ -250,6 +250,101 @@ export default function App() {
     setEditingUserId(null);
   };
 
+  const handleBackup = useCallback(async ({ download, store }) => {
+    try {
+      const response = await api.createBackup({ download, store });
+      if (download && response?.blob) {
+        const { blob, filename } = response;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename || "cms-backup.tar.gz";
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      if (store && download) {
+        handleSettingsSaved("Backup created and stored.");
+      } else if (store) {
+        handleSettingsSaved("Backup stored.");
+      } else {
+        handleSettingsSaved("Backup created.");
+      }
+    } catch (error) {
+      handleSettingsError(error);
+    }
+  }, [handleSettingsError, handleSettingsSaved]);
+
+  const handleResetData = useCallback(async () => {
+    try {
+      await api.resetData();
+      await loadAll();
+      resetClientForm();
+      resetInvoiceForm();
+      resetQuoteForm();
+      resetAgreementForm();
+      resetProposalForm();
+      resetExpenseForm();
+      handleSettingsSaved("Business data reset.");
+    } catch (error) {
+      handleSettingsError(error);
+    }
+  }, [
+    handleSettingsError,
+    handleSettingsSaved,
+    loadAll,
+    resetAgreementForm,
+    resetClientForm,
+    resetExpenseForm,
+    resetInvoiceForm,
+    resetProposalForm,
+    resetQuoteForm,
+  ]);
+
+  const handleResetWorkspace = useCallback(async () => {
+    try {
+      await api.resetWorkspace();
+      handleSettingsSaved("Workspace reset. Reloading...");
+      setTimeout(() => window.location.reload(), 800);
+    } catch (error) {
+      handleSettingsError(error);
+    }
+  }, [handleSettingsError, handleSettingsSaved]);
+
+  const handleListBackups = useCallback(async () => {
+    try {
+      return await api.listBackups();
+    } catch (error) {
+      handleSettingsError(error);
+      return { backups: [] };
+    }
+  }, [handleSettingsError]);
+
+  const handleRestoreBackup = useCallback(
+    async (filename) => {
+      try {
+        await api.restoreBackup(filename);
+        handleSettingsSaved("Backup restored. Reloading...");
+        setTimeout(() => window.location.reload(), 800);
+      } catch (error) {
+        handleSettingsError(error);
+      }
+    },
+    [handleSettingsError, handleSettingsSaved]
+  );
+
+  const handleRestoreUpload = useCallback(
+    async (file) => {
+      try {
+        await api.restoreBackupUpload(file);
+        handleSettingsSaved("Backup restored. Reloading...");
+        setTimeout(() => window.location.reload(), 800);
+      } catch (error) {
+        handleSettingsError(error);
+      }
+    },
+    [handleSettingsError, handleSettingsSaved]
+  );
+
   const loadUsers = useCallback(async () => {
     if (!user || user.role !== "owner") return;
     try {
@@ -358,6 +453,7 @@ export default function App() {
         status: invoiceForm.status,
         due_date: toDateTime(invoiceForm.due_date),
         notes: invoiceForm.notes || null,
+        quote_id: invoiceForm.quote_id ? Number(invoiceForm.quote_id) : null,
         display_id: invoiceForm.is_legacy ? invoiceForm.display_id || null : null,
         is_legacy: invoiceForm.is_legacy,
         line_items: lineItems.map((item) => ({
@@ -776,6 +872,7 @@ export default function App() {
         onEdit: (invoice) => {
                 setInvoiceForm({
                   client_id: String(invoice.client_id),
+                  quote_id: invoice.quote_id ? String(invoice.quote_id) : "",
                   display_id: invoice.display_id || "",
                   is_legacy: Boolean(invoice.is_legacy),
                   title: invoice.title,
@@ -1048,6 +1145,7 @@ export default function App() {
           <InvoicesPage
             invoices={filteredInvoices}
             clients={clients}
+            quotes={quotes}
             invoiceColumns={invoiceColumns}
             invoiceDialogOpen={invoiceDialogOpen}
             setInvoiceDialogOpen={setInvoiceDialogOpen}
@@ -1141,6 +1239,12 @@ export default function App() {
             updateSettings={updateSettings}
             onSaveSettings={saveSettings}
             onSaveSmtp={saveSettings}
+            onBackup={handleBackup}
+            onResetData={handleResetData}
+            onListBackups={handleListBackups}
+            onRestoreBackup={handleRestoreBackup}
+            onRestoreUpload={handleRestoreUpload}
+            onResetWorkspace={handleResetWorkspace}
           />
         )}
         {view === "users" && user?.role === "owner" && (

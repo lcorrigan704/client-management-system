@@ -13,6 +13,7 @@ const emptyClient = {
 
 const emptyInvoice = {
   client_id: "",
+  quote_id: "",
   display_id: "",
   is_legacy: false,
   title: "",

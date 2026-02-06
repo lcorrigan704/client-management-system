@@ -4,14 +4,58 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { fieldClass, labelClass } from "@/ui/formStyles";
+import { useState } from "react";
 
 export default function SettingsPage({
   settings,
   updateSettings,
   onSaveSettings,
   onSaveSmtp,
+  onBackup,
+  onResetData,
+  onListBackups,
+  onRestoreBackup,
+  onRestoreUpload,
+  onResetWorkspace,
 }) {
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [workspaceConfirm, setWorkspaceConfirm] = useState("");
+  const [backupDialogOpen, setBackupDialogOpen] = useState(false);
+  const [backupDownload, setBackupDownload] = useState(true);
+  const [backupStore, setBackupStore] = useState(true);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [restoreConfirm, setRestoreConfirm] = useState("");
+  const [backups, setBackups] = useState([]);
+  const [selectedBackup, setSelectedBackup] = useState("");
+  const [restoreFile, setRestoreFile] = useState(null);
+  const companyName = settings?.company_name || "Your Company";
+  const canReset = resetConfirm.trim() === companyName.trim();
+  const canResetWorkspace = workspaceConfirm.trim() === companyName.trim();
+  const canRestore = restoreConfirm.trim() === companyName.trim();
+  const canBackup = backupDownload || backupStore;
+
   return (
     <section className="space-y-6">
       <div>
@@ -331,6 +375,255 @@ export default function SettingsPage({
         <CardFooter className="justify-end">
           <Button onClick={onSaveSmtp}>Save SMTP settings</Button>
         </CardFooter>
+      </Card>
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle>Danger zone</CardTitle>
+          <CardDescription>Actions that affect data integrity.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-medium text-foreground">Download backup</p>
+                <p className="text-sm text-muted-foreground">
+                  Creates a tar.gz of the database and uploads.
+                </p>
+              </div>
+            <Dialog open={backupDialogOpen} onOpenChange={setBackupDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">Create backup</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create backup</DialogTitle>
+                  <DialogDescription>
+                    Choose whether to download the backup now and/or store it on the server for later restore.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium text-foreground">Download now</p>
+                      <p className="text-sm text-muted-foreground">
+                        Exports a tar.gz to your device.
+                      </p>
+                    </div>
+                    <Switch checked={backupDownload} onCheckedChange={setBackupDownload} />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium text-foreground">Store on server</p>
+                      <p className="text-sm text-muted-foreground">
+                        Saves a copy in the server backups folder.
+                      </p>
+                    </div>
+                    <Switch checked={backupStore} onCheckedChange={setBackupStore} />
+                  </div>
+                  {!canBackup && (
+                    <p className="text-sm text-destructive">
+                      Select at least one option.
+                    </p>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setBackupDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!canBackup) return;
+                      onBackup({ download: backupDownload, store: backupStore });
+                      setBackupDialogOpen(false);
+                    }}
+                    disabled={!canBackup}
+                  >
+                    Run backup
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-medium text-foreground">Restore backup</p>
+              <p className="text-sm text-muted-foreground">
+                Restore from a server backup or upload a tar.gz file.
+              </p>
+            </div>
+            <Dialog
+              open={restoreDialogOpen}
+              onOpenChange={(open) => {
+                setRestoreDialogOpen(open);
+                if (open && onListBackups) {
+                  onListBackups().then((list) => {
+                    const items = list?.backups || [];
+                    setBackups(items);
+                    setSelectedBackup(items[0] || "");
+                  });
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="outline">Restore backup</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Restore backup</DialogTitle>
+                  <DialogDescription>
+                    Restoring will replace the current business data and uploads. To confirm, type{" "}
+                    <strong>{companyName}</strong> below. The app will reload after completion.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Input
+                      value={restoreConfirm}
+                      onChange={(event) => setRestoreConfirm(event.target.value)}
+                      placeholder={companyName}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The company name must match exactly.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">Restore from server</p>
+                    <Select value={selectedBackup} onValueChange={setSelectedBackup}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select backup file" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {backups.length === 0 && (
+                          <SelectItem value="none" disabled>
+                            No backups found
+                          </SelectItem>
+                        )}
+                        {backups.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {item}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        if (!canRestore || !selectedBackup || selectedBackup === "none") return;
+                        onRestoreBackup(selectedBackup);
+                        setRestoreDialogOpen(false);
+                      }}
+                      disabled={!canRestore || !selectedBackup || selectedBackup === "none"}
+                    >
+                      Restore selected
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">Restore from upload</p>
+                    <Input
+                      type="file"
+                      accept=".tar.gz"
+                      onChange={(event) => setRestoreFile(event.target.files?.[0] || null)}
+                    />
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        if (!canRestore || !restoreFile) return;
+                        onRestoreUpload(restoreFile);
+                        setRestoreDialogOpen(false);
+                      }}
+                      disabled={!canRestore || !restoreFile}
+                    >
+                      Restore uploaded
+                    </Button>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setRestoreDialogOpen(false)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-medium text-foreground">Reset business data</p>
+              <p className="text-sm text-muted-foreground">
+                Deletes clients, invoices, quotes, agreements, proposals, expenses, and uploads. Users and settings remain.
+              </p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive">Reset data</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reset all business data?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action is irreversible. It will permanently delete all business records and uploads.
+                    To confirm, type <strong>{companyName}</strong> below.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-2">
+                  <Input
+                    value={resetConfirm}
+                    onChange={(event) => setResetConfirm(event.target.value)}
+                    placeholder={companyName}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The company name must match exactly.
+                  </p>
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={onResetData} disabled={!canReset}>
+                    Yes, reset data
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-medium text-foreground">Reset workspace</p>
+              <p className="text-sm text-muted-foreground">
+                Deletes all business data, settings, and users. You will need to run the setup wizard again.
+              </p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive">Reset workspace</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reset the entire workspace?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action is irreversible. It will remove all business data, settings, and user accounts.
+                    To confirm, type <strong>{companyName}</strong> below.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-2">
+                  <Input
+                    value={workspaceConfirm}
+                    onChange={(event) => setWorkspaceConfirm(event.target.value)}
+                    placeholder={companyName}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The company name must match exactly.
+                  </p>
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={onResetWorkspace} disabled={!canResetWorkspace}>
+                    Yes, reset workspace
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </CardContent>
       </Card>
     </section>
   );
