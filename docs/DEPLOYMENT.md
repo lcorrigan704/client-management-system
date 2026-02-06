@@ -26,3 +26,11 @@ SESSION_SECURE=true
 
 ## Data retention
 This app stores client data locally. Ensure you comply with applicable data protection laws in your jurisdiction.
+
+## Security hardening
+- Disable docs in production: `ENABLE_DOCS=false`
+- Enforce secure cookies over HTTPS: `SESSION_SECURE=true`
+- Set upload size limits: `MAX_UPLOAD_MB=20` (also enforce at your reverse proxy)
+- Configure login rate limiting:
+  - `LOGIN_RATE_LIMIT_ATTEMPTS=10`
+  - `LOGIN_RATE_LIMIT_WINDOW_SECONDS=900`

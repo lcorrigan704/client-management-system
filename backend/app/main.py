@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,7 +18,12 @@ from base64 import b64encode
 from .security import password_meets_policy, verify_password
 
 
-app = FastAPI(title=settings.app_name)
+app = FastAPI(
+    title=settings.app_name,
+    docs_url="/docs" if settings.enable_docs else None,
+    redoc_url="/redoc" if settings.enable_docs else None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "public" / "uploads"
@@ -27,11 +32,35 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 BACKUP_DIR = ROOT_DIR / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
+MAX_UPLOAD_BYTES = settings.max_upload_mb * 1024 * 1024
+_login_rate_cache: dict[str, dict[str, datetime | int]] = {}
+
 
 def _resolve_db_path() -> Path:
     db_path = Path(__file__).resolve().parent.parent / "app.db"
     docker_db_path = Path(__file__).resolve().parent.parent / "data" / "app.db"
     return db_path if db_path.exists() else docker_db_path
+
+
+def _safe_extract(tar, path: Path):
+    for member in tar.getmembers():
+        member_path = Path(member.name)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise HTTPException(status_code=400, detail="Unsafe path in backup archive.")
+    tar.extractall(path)
+
+
+def _save_upload_limited(uploaded: UploadFile, destination: Path, max_bytes: int):
+    total = 0
+    with destination.open("wb") as buffer:
+        while True:
+            chunk = uploaded.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(status_code=413, detail="Upload exceeds size limit.")
+            buffer.write(chunk)
 
 
 def _clear_uploads():
@@ -63,7 +92,7 @@ def _restore_from_archive(archive_path: Path):
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
         with tarfile.open(archive_path, "r:gz") as tar:
-            tar.extractall(temp_dir_path)
+            _safe_extract(tar, temp_dir_path)
 
         extracted_db = temp_dir_path / "app.db"
         if not extracted_db.exists():
@@ -96,10 +125,19 @@ _AUTH_ALLOWLIST = {
     "/auth/status",
     "/auth/login",
     "/auth/setup",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
 }
+if settings.enable_docs:
+    _AUTH_ALLOWLIST.update({"/docs", "/redoc", "/openapi.json"})
+
+
+@app.middleware("http")
+async def upload_size_limit(request: Request, call_next):
+    if request.method in {"POST", "PUT"}:
+        if request.url.path in {"/proposals/uploads", "/admin/restore/upload"}:
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Upload exceeds size limit."})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -207,8 +245,7 @@ def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_rol
     temp_file = tempfile.NamedTemporaryFile(prefix="cms-restore-", suffix=".tar.gz", delete=False)
     temp_path = Path(temp_file.name)
     temp_file.close()
-    with temp_path.open("wb") as buffer:
-        buffer.write(file.file.read())
+    _save_upload_limited(file, temp_path, MAX_UPLOAD_BYTES)
     try:
         _restore_from_archive(temp_path)
     finally:
@@ -296,7 +333,32 @@ def auth_setup(payload: schemas.AuthSetupRequest, response: Response, db: Sessio
 
 
 @app.post("/auth/login", response_model=schemas.AuthStatus)
-def auth_login(payload: schemas.AuthLoginRequest, response: Response, db: Session = Depends(get_db)):
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limited(key: str) -> bool:
+    now = datetime.utcnow()
+    entry = _login_rate_cache.get(key)
+    if not entry or entry["reset_at"] < now:
+        _login_rate_cache[key] = {
+            "count": 1,
+            "reset_at": now + timedelta(seconds=settings.login_rate_limit_window_seconds),
+        }
+        return False
+    entry["count"] = int(entry["count"]) + 1
+    return int(entry["count"]) > settings.login_rate_limit_attempts
+
+
+@app.post("/auth/login", response_model=schemas.AuthStatus)
+def auth_login(payload: schemas.AuthLoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
+    client_ip = _get_client_ip(request)
+    rate_key = f"{client_ip}:{payload.email}"
+    if _rate_limited(rate_key):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     user = crud.get_user_by_email(db, payload.email)
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials.")
@@ -596,8 +658,7 @@ def upload_proposal_assets(files: list[UploadFile] = File(...)):
             raise HTTPException(status_code=400, detail="Only image files are supported.")
         filename = f"{uuid4().hex}{suffix}"
         destination = UPLOADS_DIR / filename
-        with destination.open("wb") as buffer:
-            buffer.write(uploaded.file.read())
+        _save_upload_limited(uploaded, destination, MAX_UPLOAD_BYTES)
         saved.append(
             {
                 "filename": uploaded.filename,
