@@ -9,6 +9,7 @@ import { DatePicker } from "@/components/date-picker";
 import { useEffect, useMemo, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { fieldClass, labelClass } from "@/ui/formStyles";
+import { formatDate } from "@/utils/format";
 
 export default function AgreementsPage({
   agreements,
@@ -26,6 +27,80 @@ export default function AgreementsPage({
   const [stepIndex, setStepIndex] = useState(0);
   const safeClients = Array.isArray(clients) ? clients : [];
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
+  const clientMap = new Map(safeClients.map((client) => [client.id, client]));
+  const quoteMap = new Map(safeQuotes.map((quote) => [quote.id, quote]));
+  const exportColumns = [
+    { key: "display_id", header: "Agreement ID" },
+    { key: "client", header: "Client" },
+    { key: "quote", header: "Quote" },
+    { key: "title", header: "Title" },
+    { key: "start_date", header: "Start date" },
+    { key: "end_date", header: "End date" },
+    { key: "scope_of_services", header: "Scope of services" },
+    { key: "duration", header: "Duration" },
+    { key: "availability", header: "Availability" },
+    { key: "meetings", header: "Meetings" },
+    { key: "access_requirements", header: "Access requirements" },
+    { key: "fees_payments", header: "Fees & payments" },
+    { key: "data_protection", header: "Data protection" },
+    { key: "termination", header: "Termination" },
+    { key: "sla_items", header: "SLA items" },
+    { key: "company_signatory_name", header: "Company signatory" },
+    { key: "company_signed_date", header: "Company signed date" },
+    { key: "client_signatory_name", header: "Client signatory" },
+  ];
+  const slaColumns = [
+    { key: "agreement_display_id", header: "Agreement ID" },
+    { key: "sla", header: "SLA" },
+    { key: "timescale", header: "Timescale" },
+  ];
+  const exportConfig = {
+    label: "Export agreements",
+    mode: "zip",
+    filenameBase: "agreements",
+    parent: {
+      columns: exportColumns,
+      mapRow: (agreement) => {
+        const client = clientMap.get(agreement.client_id);
+        const quote = quoteMap.get(agreement.quote_id);
+        const slaItems = (agreement.sla_items || [])
+          .map((item) => `${item.sla} (${item.timescale})`)
+          .join(" ; ");
+        return {
+          display_id: agreement.display_id || "",
+          client: client?.company || client?.name || "",
+          quote: quote?.display_id || quote?.title || "",
+          title: agreement.title || "",
+          start_date: formatDate(agreement.start_date),
+          end_date: formatDate(agreement.end_date),
+          scope_of_services: agreement.scope_of_services || "",
+          duration: agreement.duration || "",
+          availability: agreement.availability || "",
+          meetings: agreement.meetings || "",
+          access_requirements: agreement.access_requirements || "",
+          fees_payments: agreement.fees_payments || "",
+          data_protection: agreement.data_protection || "",
+          termination: agreement.termination || "",
+          sla_items: slaItems,
+          company_signatory_name: agreement.company_signatory_name || "",
+          company_signed_date: formatDate(agreement.company_signed_date),
+          client_signatory_name: agreement.client_signatory_name || "",
+        };
+      },
+    },
+    child: {
+      filename: "agreement_sla_items.csv",
+      columns: slaColumns,
+      mapRows: (parentRows) =>
+        parentRows.flatMap((agreement) =>
+          (agreement.sla_items || []).map((item) => ({
+            agreement_display_id: agreement.display_id || "",
+            sla: item.sla || "",
+            timescale: item.timescale || "",
+          }))
+        ),
+    },
+  };
 
   useEffect(() => {
     if (agreementDialogOpen) {
@@ -101,6 +176,7 @@ export default function AgreementsPage({
             emptyMessage="No agreements yet."
             searchKey="title"
             searchPlaceholder="Search agreements..."
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>

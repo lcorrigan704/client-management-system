@@ -15,7 +15,7 @@ import {
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fieldClass, gridTwo, labelClass } from "@/ui/formStyles";
-import { formatGBP } from "@/utils/format";
+import { formatGBP, formatDate } from "@/utils/format";
 
 export default function ExpensesPage({
   expenses,
@@ -30,6 +30,39 @@ export default function ExpensesPage({
   resetExpenseForm,
   handleExpenseSubmit,
 }) {
+  const clientMap = new Map(clients.map((client) => [client.id, client]));
+  const userMap = new Map(users.map((person) => [person.id, person]));
+  const exportColumns = [
+    { key: "display_id", header: "Expense ID" },
+    { key: "client", header: "Client" },
+    { key: "user", header: "User" },
+    { key: "title", header: "Title" },
+    { key: "amount", header: "Amount" },
+    { key: "incurred_date", header: "Incurred date" },
+    { key: "notes", header: "Notes" },
+  ];
+  const exportConfig = {
+    label: "Export expenses",
+    mode: "csv",
+    filename: "expenses.csv",
+    parent: {
+      columns: exportColumns,
+      mapRow: (expense) => {
+        const client = clientMap.get(expense.client_id);
+        const user = userMap.get(expense.user_id);
+        return {
+          display_id: expense.display_id || "",
+          client: client?.company || client?.name || "",
+          user: user?.email || "",
+          title: expense.title || "",
+          amount: formatGBP(expense.amount),
+          incurred_date: formatDate(expense.incurred_date),
+          notes: expense.notes || "",
+        };
+      },
+    },
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -60,6 +93,7 @@ export default function ExpensesPage({
             totalKey="amount"
             totalLabel="Total expenses"
             formatTotal={formatGBP}
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>

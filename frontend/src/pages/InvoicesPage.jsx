@@ -7,7 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
-import { formatGBP } from "@/utils/format";
+import { formatGBP, formatDate } from "@/utils/format";
 
 export default function InvoicesPage({
   invoices,
@@ -24,9 +24,76 @@ export default function InvoicesPage({
   handleMarkInvoicePaid,
   emptyInvoice,
 }) {
+  const clientMap = new Map(clients.map((client) => [client.id, client]));
+  const quoteMap = new Map(quotes.map((quote) => [quote.id, quote]));
   const clientQuotes = quotes.filter(
     (quote) => String(quote.client_id) === String(invoiceForm.client_id)
   );
+  const exportColumns = [
+    { key: "display_id", header: "Invoice ID" },
+    { key: "client", header: "Client" },
+    { key: "quote", header: "Quote" },
+    { key: "title", header: "Title" },
+    { key: "status", header: "Status" },
+    { key: "issued_at", header: "Issued at" },
+    { key: "due_date", header: "Due date" },
+    { key: "amount", header: "Amount" },
+    { key: "line_items", header: "Line items" },
+    { key: "notes", header: "Notes" },
+  ];
+  const lineItemColumns = [
+    { key: "invoice_display_id", header: "Invoice ID" },
+    { key: "description", header: "Description" },
+    { key: "quantity", header: "Quantity" },
+    { key: "unit_amount", header: "Unit amount" },
+    { key: "line_total", header: "Line total" },
+  ];
+  const exportConfig = {
+    label: "Export invoices",
+    mode: "zip",
+    filenameBase: "invoices",
+    parent: {
+      columns: exportColumns,
+      mapRow: (invoice) => {
+        const client = clientMap.get(invoice.client_id);
+        const quote = quoteMap.get(invoice.quote_id);
+        const lineItems = (invoice.line_items || [])
+          .map(
+            (item) =>
+              `${item.description} | ${Number(item.quantity || 0)} x ${formatGBP(
+                item.unit_amount
+              )}`
+          )
+          .join(" ; ");
+        return {
+          display_id: invoice.display_id || "",
+          client: client?.company || client?.name || "",
+          quote: quote?.display_id || quote?.title || "",
+          title: invoice.title || "",
+          status: invoice.status || "",
+          issued_at: formatDate(invoice.issued_at),
+          due_date: formatDate(invoice.due_date),
+          amount: formatGBP(invoice.amount),
+          line_items: lineItems,
+          notes: invoice.notes || "",
+        };
+      },
+    },
+    child: {
+      filename: "invoice_line_items.csv",
+      columns: lineItemColumns,
+      mapRows: (parentRows) =>
+        parentRows.flatMap((invoice) =>
+          (invoice.line_items || []).map((item) => ({
+            invoice_display_id: invoice.display_id || "",
+            description: item.description || "",
+            quantity: Number(item.quantity || 0),
+            unit_amount: Number(item.unit_amount || 0),
+            line_total: Number(item.quantity || 0) * Number(item.unit_amount || 0),
+          }))
+        ),
+    },
+  };
 
   return (
     <section className="space-y-6">
@@ -65,6 +132,7 @@ export default function InvoicesPage({
             totalKey="amount"
             totalLabel="Total invoiced"
             formatTotal={formatGBP}
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>

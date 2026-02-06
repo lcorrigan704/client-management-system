@@ -17,6 +17,39 @@ export default function ClientsPage({
   resetClientForm,
   handleClientSubmit,
 }) {
+  const exportColumns = [
+    { key: "name", header: "Name" },
+    { key: "company", header: "Company" },
+    { key: "contact_name", header: "Contact name" },
+    { key: "email", header: "Email" },
+    { key: "contact_email", header: "Contact email" },
+    { key: "phone", header: "Phone" },
+    { key: "contact_phone", header: "Contact phone" },
+    { key: "website", header: "Website" },
+    { key: "invoice_email", header: "Invoice email" },
+    { key: "address", header: "Address" },
+  ];
+  const exportConfig = {
+    label: "Export clients",
+    mode: "csv",
+    filename: "clients.csv",
+    parent: {
+      columns: exportColumns,
+      mapRow: (client) => ({
+        name: client.name || "",
+        company: client.company || "",
+        contact_name: client.contact_name || "",
+        email: client.email || "",
+        contact_email: client.contact_email || "",
+        phone: client.phone || "",
+        contact_phone: client.contact_phone || "",
+        website: client.website || "",
+        invoice_email: client.invoice_email || "",
+        address: client.address || "",
+      }),
+    },
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -44,6 +77,7 @@ export default function ClientsPage({
             emptyMessage="No clients yet."
             searchKey="name"
             searchPlaceholder="Search clients..."
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>

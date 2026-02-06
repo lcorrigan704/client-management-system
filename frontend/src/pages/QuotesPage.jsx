@@ -7,7 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
-import { formatGBP } from "@/utils/format";
+import { formatGBP, formatDate } from "@/utils/format";
 
 export default function QuotesPage({
   quotes,
@@ -22,6 +22,70 @@ export default function QuotesPage({
   handleQuoteSubmit,
   emptyQuote,
 }) {
+  const clientMap = new Map(clients.map((client) => [client.id, client]));
+  const exportColumns = [
+    { key: "display_id", header: "Quote ID" },
+    { key: "client", header: "Client" },
+    { key: "title", header: "Title" },
+    { key: "status", header: "Status" },
+    { key: "issued_at", header: "Issued at" },
+    { key: "valid_until", header: "Valid until" },
+    { key: "amount", header: "Amount" },
+    { key: "line_items", header: "Line items" },
+    { key: "notes", header: "Notes" },
+  ];
+  const lineItemColumns = [
+    { key: "quote_display_id", header: "Quote ID" },
+    { key: "description", header: "Description" },
+    { key: "quantity", header: "Quantity" },
+    { key: "unit_amount", header: "Unit amount" },
+    { key: "line_total", header: "Line total" },
+  ];
+  const exportConfig = {
+    label: "Export quotes",
+    mode: "zip",
+    filenameBase: "quotes",
+    parent: {
+      columns: exportColumns,
+      mapRow: (quote) => {
+        const client = clientMap.get(quote.client_id);
+        const lineItems = (quote.line_items || [])
+          .map(
+            (item) =>
+              `${item.description} | ${Number(item.quantity || 0)} x ${formatGBP(
+                item.unit_amount
+              )}`
+          )
+          .join(" ; ");
+        return {
+          display_id: quote.display_id || "",
+          client: client?.company || client?.name || "",
+          title: quote.title || "",
+          status: quote.status || "",
+          issued_at: formatDate(quote.issued_at),
+          valid_until: formatDate(quote.valid_until),
+          amount: formatGBP(quote.amount),
+          line_items: lineItems,
+          notes: quote.notes || "",
+        };
+      },
+    },
+    child: {
+      filename: "quote_line_items.csv",
+      columns: lineItemColumns,
+      mapRows: (parentRows) =>
+        parentRows.flatMap((quote) =>
+          (quote.line_items || []).map((item) => ({
+            quote_display_id: quote.display_id || "",
+            description: item.description || "",
+            quantity: Number(item.quantity || 0),
+            unit_amount: Number(item.unit_amount || 0),
+            line_total: Number(item.quantity || 0) * Number(item.unit_amount || 0),
+          }))
+        ),
+    },
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -50,6 +114,7 @@ export default function QuotesPage({
             totalKey="amount"
             totalLabel="Total quoted"
             formatTotal={formatGBP}
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>
