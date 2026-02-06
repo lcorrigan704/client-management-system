@@ -4,8 +4,9 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
 from . import crud, models, schemas
@@ -19,9 +20,63 @@ from .security import password_meets_policy, verify_password
 
 app = FastAPI(title=settings.app_name)
 
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "public" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+BACKUP_DIR = ROOT_DIR / "backups"
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_db_path() -> Path:
+    db_path = Path(__file__).resolve().parent.parent / "app.db"
+    docker_db_path = Path(__file__).resolve().parent.parent / "data" / "app.db"
+    return db_path if db_path.exists() else docker_db_path
+
+
+def _clear_uploads():
+    if not UPLOADS_DIR.exists():
+        return
+    for item in UPLOADS_DIR.iterdir():
+        if item.name == ".gitkeep":
+            continue
+        if item.is_file():
+            item.unlink()
+        elif item.is_dir():
+            for child in item.rglob("*"):
+                if child.is_file():
+                    child.unlink()
+            for child in sorted(item.rglob("*"), reverse=True):
+                if child.is_dir():
+                    child.rmdir()
+            item.rmdir()
+
+
+def _restore_from_archive(archive_path: Path):
+    import tarfile
+    import tempfile
+    import shutil
+
+    if not archive_path.exists():
+        raise HTTPException(status_code=404, detail="Backup not found.")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(temp_dir_path)
+
+        extracted_db = temp_dir_path / "app.db"
+        if not extracted_db.exists():
+            raise HTTPException(status_code=400, detail="Backup missing app.db.")
+
+        target_db = _resolve_db_path()
+        engine.dispose()
+        shutil.copy2(extracted_db, target_db)
+
+        extracted_uploads = temp_dir_path / "uploads"
+        if extracted_uploads.exists():
+            _clear_uploads()
+            shutil.copytree(extracted_uploads, UPLOADS_DIR, dirs_exist_ok=True)
 
 allowed_origins = [
     origin.strip()
@@ -83,6 +138,129 @@ def update_settings(
     settings_row = crud.update_settings(db, payload)
     settings_row.smtp_password = None
     return settings_row
+
+
+@app.post("/admin/backup")
+def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["owner", "admin"]))):
+    import tarfile
+    from datetime import datetime
+    import tempfile
+
+    source_db = _resolve_db_path()
+    if not source_db.exists():
+        raise HTTPException(status_code=500, detail="Database file not found.")
+
+    if not payload.download and not payload.store:
+        raise HTTPException(status_code=400, detail="Select download and/or store.")
+
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d")
+    backup_name = f"cms-{timestamp}.tar.gz"
+
+    if payload.store:
+        backup_path = BACKUP_DIR / backup_name
+    else:
+        temp_file = tempfile.NamedTemporaryFile(prefix="cms-", suffix=".tar.gz", delete=False)
+        backup_path = Path(temp_file.name)
+        temp_file.close()
+
+    with tarfile.open(backup_path, "w:gz") as tar:
+        tar.add(str(source_db), arcname="app.db")
+        if UPLOADS_DIR.exists():
+            tar.add(str(UPLOADS_DIR), arcname="uploads")
+
+    if payload.download:
+        background = None
+        if not payload.store:
+            background = BackgroundTask(lambda: backup_path.unlink(missing_ok=True))
+        return FileResponse(
+            path=str(backup_path),
+            filename=backup_name,
+            media_type="application/gzip",
+            background=background,
+        )
+
+    return {"status": "stored", "filename": backup_name}
+
+
+@app.get("/admin/backups")
+def list_backups(user=Depends(require_role(["owner", "admin"]))):
+    files = sorted(
+        [p.name for p in BACKUP_DIR.glob("*.tar.gz") if p.is_file()],
+        reverse=True,
+    )
+    return {"backups": files}
+
+
+@app.post("/admin/restore")
+def restore_backup(payload: schemas.RestoreRequest, user=Depends(require_role(["owner", "admin"]))):
+    archive_path = BACKUP_DIR / payload.filename
+    _restore_from_archive(archive_path)
+    return {"status": "restored", "source": "server", "filename": payload.filename}
+
+
+@app.post("/admin/restore/upload")
+def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_role(["owner", "admin"]))):
+    import tempfile
+    filename = file.filename or ""
+    if not filename.endswith(".tar.gz"):
+        raise HTTPException(status_code=400, detail="Only .tar.gz backups are supported.")
+    temp_file = tempfile.NamedTemporaryFile(prefix="cms-restore-", suffix=".tar.gz", delete=False)
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    with temp_path.open("wb") as buffer:
+        buffer.write(file.file.read())
+    try:
+        _restore_from_archive(temp_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+    return {"status": "restored", "source": "upload"}
+
+
+@app.post("/admin/reset")
+def reset_data(db: Session = Depends(get_db), user=Depends(require_role(["owner", "admin"]))):
+    db.query(models.ProposalAttachment).delete()
+    db.query(models.ProposalRequirement).delete()
+    db.query(models.ServiceAgreementSLA).delete()
+    db.query(models.InvoiceLineItem).delete()
+    db.query(models.QuoteLineItem).delete()
+    db.query(models.Proposal).delete()
+    db.query(models.ServiceAgreement).delete()
+    db.query(models.Invoice).delete()
+    db.query(models.Quote).delete()
+    db.query(models.Expense).delete()
+    db.query(models.Client).delete()
+    db.commit()
+
+    if UPLOADS_DIR.exists():
+        for item in UPLOADS_DIR.iterdir():
+            if item.name == ".gitkeep":
+                continue
+            if item.is_file():
+                item.unlink()
+            elif item.is_dir():
+                for child in item.rglob("*"):
+                    if child.is_file():
+                        child.unlink()
+                for child in sorted(item.rglob("*"), reverse=True):
+                    if child.is_dir():
+                        child.rmdir()
+                item.rmdir()
+
+    return {"status": "reset"}
+
+
+@app.post("/admin/reset-workspace")
+def reset_workspace(db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
+    # Remove business data first.
+    reset_data(db, user)
+
+    # Remove auth/session data and settings.
+    db.query(models.UserSession).delete()
+    db.query(models.User).delete()
+    db.query(models.Settings).delete()
+    db.commit()
+
+    return {"status": "workspace_reset"}
 
 
 @app.get("/auth/status", response_model=schemas.AuthStatus)

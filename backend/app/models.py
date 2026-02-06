@@ -48,6 +48,9 @@ class Invoice(Base):
     client_id: Mapped[int] = mapped_column(
         ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
     )
+    quote_id: Mapped[int | None] = mapped_column(
+        ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="draft")
@@ -57,6 +60,7 @@ class Invoice(Base):
     notes: Mapped[str | None] = mapped_column(Text())
 
     client: Mapped["Client"] = relationship("Client", back_populates="invoices")
+    quote: Mapped["Quote"] = relationship("Quote", back_populates="invoices")
     line_items: Mapped[list["InvoiceLineItem"]] = relationship(
         "InvoiceLineItem", back_populates="invoice", cascade="all, delete-orphan"
     )
@@ -81,6 +85,9 @@ class Quote(Base):
     client: Mapped["Client"] = relationship("Client", back_populates="quotes")
     line_items: Mapped[list["QuoteLineItem"]] = relationship(
         "QuoteLineItem", back_populates="quote", cascade="all, delete-orphan"
+    )
+    invoices: Mapped[list["Invoice"]] = relationship(
+        "Invoice", back_populates="quote"
     )
     agreements: Mapped[list["ServiceAgreement"]] = relationship(
         "ServiceAgreement", back_populates="quote"

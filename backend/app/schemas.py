@@ -52,6 +52,7 @@ class InvoiceBase(BaseModel):
     status: Optional[str] = "draft"
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
+    quote_id: Optional[int] = None
 
 
 class LineItemBase(BaseModel):
@@ -79,6 +80,7 @@ class InvoiceUpdate(BaseModel):
     due_date: Optional[datetime] = None
     paid_at: Optional[datetime] = None
     notes: Optional[str] = None
+    quote_id: Optional[int] = None
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
     line_items: Optional[list[LineItemBase]] = None
@@ -89,6 +91,7 @@ class InvoiceOut(InvoiceBase):
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
     client_id: int
+    quote_id: Optional[int] = None
     issued_at: datetime
     paid_at: Optional[datetime] = None
     line_items: list[LineItemOut] = []
@@ -400,6 +403,15 @@ class EmailDraftResponse(BaseModel):
     message: str
     pdf_base64: Optional[str] = None
     pdf_filename: Optional[str] = None
+
+
+class BackupRequest(BaseModel):
+    download: bool = True
+    store: bool = True
+
+
+class RestoreRequest(BaseModel):
+    filename: str
 
 
 class SettingsBase(BaseModel):

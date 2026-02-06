@@ -12,6 +12,7 @@ import { formatGBP } from "@/utils/format";
 export default function InvoicesPage({
   invoices,
   clients,
+  quotes,
   invoiceColumns,
   invoiceDialogOpen,
   setInvoiceDialogOpen,
@@ -23,6 +24,10 @@ export default function InvoicesPage({
   handleMarkInvoicePaid,
   emptyInvoice,
 }) {
+  const clientQuotes = quotes.filter(
+    (quote) => String(quote.client_id) === String(invoiceForm.client_id)
+  );
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -85,6 +90,44 @@ export default function InvoicesPage({
                   {clients.map((client) => (
                     <SelectItem key={client.id} value={String(client.id)}>
                       {client.company || client.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className={fieldClass}>
+              <label className={labelClass}>Quote (optional)</label>
+              <Select
+                value={invoiceForm.quote_id}
+                onValueChange={(value) => {
+                  const quoteId = value === "none" ? "" : value;
+                  const selectedQuote = clientQuotes.find(
+                    (quote) => String(quote.id) === String(quoteId)
+                  );
+                  const nextLineItems =
+                    selectedQuote?.line_items && selectedQuote.line_items.length
+                      ? selectedQuote.line_items.map((item) => ({
+                          description: item.description,
+                          quantity: item.quantity,
+                          unit_amount: item.unit_amount,
+                        }))
+                      : emptyInvoice.line_items;
+                  setInvoiceForm({
+                    ...invoiceForm,
+                    quote_id: quoteId,
+                    line_items: selectedQuote ? nextLineItems : invoiceForm.line_items,
+                  });
+                }}
+                disabled={!invoiceForm.client_id}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select quote" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No quote</SelectItem>
+                  {clientQuotes.map((quote) => (
+                    <SelectItem key={quote.id} value={String(quote.id)}>
+                      {quote.display_id || quote.title}
                     </SelectItem>
                   ))}
                 </SelectContent>

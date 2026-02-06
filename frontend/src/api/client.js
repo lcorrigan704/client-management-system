@@ -102,6 +102,40 @@ const api = {
   deleteExpense: (id) => request(`/expenses/${id}`, { method: "DELETE" }),
   draftEmail: (payload) =>
     request("/email/draft", { method: "POST", body: JSON.stringify(payload) }),
+  createBackup: async ({ download = true, store = true } = {}) => {
+    if (download) {
+      const response = await fetch(`${API_URL}/admin/backup`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ download, store }),
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || "Request failed");
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = filenameMatch ? filenameMatch[1] : "cms-backup.tar.gz";
+      const blob = await response.blob();
+      return { blob, filename, stored: store };
+    }
+
+    return request("/admin/backup", {
+      method: "POST",
+      body: JSON.stringify({ download, store }),
+    });
+  },
+  listBackups: () => request("/admin/backups"),
+  restoreBackup: (filename) =>
+    request("/admin/restore", { method: "POST", body: JSON.stringify({ filename }) }),
+  restoreBackupUpload: (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return requestForm("/admin/restore/upload", formData);
+  },
+  resetData: () => request("/admin/reset", { method: "POST" }),
+  resetWorkspace: () => request("/admin/reset-workspace", { method: "POST" }),
   authStatus: () => request("/auth/status"),
   authLogin: (payload) =>
     request("/auth/login", { method: "POST", body: JSON.stringify(payload) }),

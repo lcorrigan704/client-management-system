@@ -194,7 +194,12 @@ This removes `backend/app.db` and clears `backend/public/uploads`.
 - Set `APP_SECRET` in `backend/.env` before first run; changing it later will invalidate stored SMTP credentials and sessions.
 
 ## Backups
-Back up the SQLite DB and uploads directory:
+Preferred: run the helper script:
+```bash
+./scripts/backup.sh
+```
+
+Manual alternative (SQLite DB + uploads directory):
 ```bash
 tar -czf backups/cms-$(date +%F).tar.gz backend/app.db backend/public/uploads
 ```
