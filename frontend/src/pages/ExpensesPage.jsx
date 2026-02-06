@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fieldClass, gridTwo, labelClass } from "@/ui/formStyles";
 import { formatGBP, formatDate } from "@/utils/format";
+import { API_URL } from "@/api/client";
 
 export default function ExpensesPage({
   expenses,
@@ -29,9 +31,11 @@ export default function ExpensesPage({
   editingExpenseId,
   resetExpenseForm,
   handleExpenseSubmit,
+  handleExpenseUpload,
 }) {
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const userMap = new Map(users.map((person) => [person.id, person]));
+  const [uploading, setUploading] = React.useState(false);
   const exportColumns = [
     { key: "display_id", header: "Expense ID" },
     { key: "client", header: "Client" },
@@ -40,16 +44,20 @@ export default function ExpensesPage({
     { key: "amount", header: "Amount" },
     { key: "incurred_date", header: "Incurred date" },
     { key: "notes", header: "Notes" },
+    { key: "receipts", header: "Receipts" },
   ];
   const exportConfig = {
     label: "Export expenses",
-    mode: "csv",
-    filename: "expenses.csv",
+    mode: "zip",
+    filenameBase: "expenses",
     parent: {
       columns: exportColumns,
       mapRow: (expense) => {
         const client = clientMap.get(expense.client_id);
         const user = userMap.get(expense.user_id);
+        const receiptNames = (expense.receipts || [])
+          .map((item) => item.filename || item.file_path || "")
+          .join(" ; ");
         return {
           display_id: expense.display_id || "",
           client: client?.company || client?.name || "",
@@ -58,9 +66,63 @@ export default function ExpensesPage({
           amount: formatGBP(expense.amount),
           incurred_date: formatDate(expense.incurred_date),
           notes: expense.notes || "",
+          receipts: receiptNames,
         };
       },
     },
+    child: {
+      filename: "expense_receipts.csv",
+      columns: [
+        { key: "expense_display_id", header: "Expense ID" },
+        { key: "filename", header: "Filename" },
+        { key: "file_path", header: "File path" },
+      ],
+      mapRows: (parentRows) =>
+        parentRows.flatMap((expense) =>
+          (expense.receipts || []).map((receipt) => ({
+            expense_display_id: expense.display_id || "",
+            filename: receipt.filename || "",
+            file_path: receipt.file_path || "",
+          }))
+        ),
+    },
+    attachments: {
+      getItems: (parentRows) =>
+        parentRows.flatMap((expense) =>
+          (expense.receipts || []).map((receipt) => {
+            const filePath = receipt.file_path || "";
+            const url = filePath.startsWith("http")
+              ? filePath
+              : `${API_URL}/${filePath.replace(/^\//, "")}`;
+            return {
+              url,
+              filename: receipt.filename || filePath.split("/").pop() || "receipt",
+            };
+          })
+        ),
+    },
+  };
+
+  const handleFilesSelected = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length || !handleExpenseUpload) return;
+    setUploading(true);
+    try {
+      const response = await handleExpenseUpload(files);
+      const nextReceipts = [
+        ...(expenseForm.receipts || []),
+        ...(response?.files || []),
+      ];
+      setExpenseForm({ ...expenseForm, receipts: nextReceipts });
+    } finally {
+      setUploading(false);
+      event.target.value = "";
+    }
+  };
+
+  const removeReceipt = (index) => {
+    const nextReceipts = expenseForm.receipts.filter((_, idx) => idx !== index);
+    setExpenseForm({ ...expenseForm, receipts: nextReceipts });
   };
 
   return (
@@ -207,6 +269,32 @@ export default function ExpensesPage({
                 value={expenseForm.notes}
                 onChange={(event) => setExpenseForm({ ...expenseForm, notes: event.target.value })}
               />
+            </div>
+            <div className={fieldClass}>
+              <label className={labelClass}>Receipts</label>
+              <Input
+                type="file"
+                accept=".pdf,image/*"
+                multiple
+                onChange={handleFilesSelected}
+                disabled={uploading}
+              />
+              <div className="mt-2 space-y-2">
+                {(expenseForm.receipts || []).map((receipt, index) => (
+                  <div key={`${receipt.file_path}-${index}`} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate text-foreground">{receipt.filename || "Receipt"}</p>
+                      <p className="truncate text-xs text-muted-foreground">{receipt.file_path}</p>
+                    </div>
+                    <Button type="button" variant="ghost" onClick={() => removeReceipt(index)}>
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                {!(expenseForm.receipts || []).length ? (
+                  <p className="text-xs text-muted-foreground">At least one receipt is required.</p>
+                ) : null}
+              </div>
             </div>
             <DialogFooter>
               <DialogClose asChild>

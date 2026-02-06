@@ -81,6 +81,7 @@ const emptyExpense = {
   amount: "",
   incurred_date: null,
   notes: "",
+  receipts: [],
 };
 
 const emptyEmailDraft = {

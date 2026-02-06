@@ -457,10 +457,19 @@ def update_proposal(db: Session, proposal: models.Proposal, payload: schemas.Pro
 
 def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseCreate):
     data = payload.model_dump()
+    receipts = data.pop("receipts", None) or []
     display_id = (data.pop("display_id", None) or "").strip()
     is_legacy = data.pop("is_legacy", None)
+    if len(receipts) == 0:
+        raise ValueError("At least one receipt is required.")
     expense = models.Expense(client_id=client_id, **data)
     db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    expense.receipts = [
+        models.ExpenseReceipt(filename=item["filename"], file_path=item["file_path"])
+        for item in receipts
+    ]
     db.commit()
     db.refresh(expense)
     settings = get_or_create_settings(db)
@@ -479,6 +488,7 @@ def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseC
 
 def update_expense(db: Session, expense: models.Expense, payload: schemas.ExpenseUpdate):
     data = payload.model_dump(exclude_unset=True)
+    receipts = data.pop("receipts", None)
     if "display_id" in data:
         display_id = (data.pop("display_id") or "").strip()
         if display_id:
@@ -492,6 +502,13 @@ def update_expense(db: Session, expense: models.Expense, payload: schemas.Expens
         expense.is_legacy = bool(data.pop("is_legacy"))
     for field, value in data.items():
         setattr(expense, field, value)
+    if receipts is not None:
+        if len(receipts) == 0:
+            raise ValueError("At least one receipt is required.")
+        expense.receipts = [
+            models.ExpenseReceipt(filename=item["filename"], file_path=item["file_path"])
+            for item in receipts
+        ]
     db.commit()
     db.refresh(expense)
     if not expense.display_id:

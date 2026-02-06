@@ -610,9 +610,25 @@ export default function App() {
     []
   );
 
+  const handleExpenseUpload = useCallback(
+    async (files) => {
+      try {
+        return await api.uploadExpenseReceipts(files);
+      } catch (error) {
+        toast.error(error.message || "Unable to upload receipts.");
+        return null;
+      }
+    },
+    []
+  );
+
   const handleExpenseSubmit = async (event) => {
     event.preventDefault();
     try {
+      if (!expenseForm.receipts || expenseForm.receipts.length === 0) {
+        toast.error("At least one receipt is required.");
+        return;
+      }
       const payload = {
         title: expenseForm.title,
         amount: Number(expenseForm.amount || 0),
@@ -621,6 +637,7 @@ export default function App() {
         display_id: expenseForm.is_legacy ? expenseForm.display_id || null : null,
         is_legacy: expenseForm.is_legacy,
         user_id: expenseForm.user_id ? Number(expenseForm.user_id) : null,
+        receipts: expenseForm.receipts || [],
       };
       if (editingExpenseId) {
         await api.updateExpense(editingExpenseId, {
@@ -1031,6 +1048,7 @@ export default function App() {
             amount: expense.amount,
             incurred_date: expense.incurred_date ? parseISO(expense.incurred_date) : null,
             notes: expense.notes || "",
+            receipts: expense.receipts || [],
           });
           setEditingExpenseId(expense.id);
           setExpenseDialogOpen(true);
@@ -1217,6 +1235,7 @@ export default function App() {
             editingExpenseId={editingExpenseId}
             resetExpenseForm={resetExpenseForm}
             handleExpenseSubmit={handleExpenseSubmit}
+            handleExpenseUpload={handleExpenseUpload}
           />
         )}
         {view === "emails" && (
