@@ -1,4 +1,5 @@
 import * as React from "react";
+import JSZip from "jszip";
 import {
   getFilteredRowModel,
   getPaginationRowModel,
@@ -30,9 +31,11 @@ export function DataTable({
   totalKey,
   totalLabel = "Total",
   formatTotal,
+  exportConfig,
 }) {
   const [sorting, setSorting] = React.useState([]);
   const [columnFilters, setColumnFilters] = React.useState([]);
+  const [isExporting, setIsExporting] = React.useState(false);
 
   const table = useReactTable({
     data,
@@ -55,16 +58,97 @@ export function DataTable({
       .rows.reduce((sum, row) => sum + Number(row.original?.[totalKey] || 0), 0);
   }, [data, totalKey, columnFilters, sorting]);
 
+  const buildCsv = React.useCallback((rows, columnsConfig) => {
+    if (!columnsConfig || columnsConfig.length === 0) return "";
+    const headers = columnsConfig.map((column) => column.header);
+    const body = rows.map((row) =>
+      columnsConfig
+        .map((column) => {
+          const value = row?.[column.key];
+          const normalized = value === null || value === undefined ? "" : String(value);
+          return `"${normalized.replace(/"/g, '""')}"`
+        })
+        .join(",")
+    );
+    return [headers.join(","), ...body].join("\n");
+  }, []);
+
+  const handleExport = React.useCallback(async () => {
+    if (!exportConfig || isExporting) return;
+    setIsExporting(true);
+    try {
+      const parentRows = table.getFilteredRowModel().rows.map((row) => row.original);
+      const parentData = exportConfig.parent?.mapRow
+        ? parentRows.map(exportConfig.parent.mapRow)
+        : parentRows;
+      const parentCsv = buildCsv(parentData, exportConfig.parent?.columns || []);
+
+      if (exportConfig.mode === "zip") {
+        const zip = new JSZip();
+        const filenameBase = exportConfig.filenameBase || "export";
+        zip.file(`${filenameBase}.csv`, parentCsv);
+
+        if (exportConfig.child?.columns && exportConfig.child?.mapRows) {
+          const childRows = exportConfig.child.mapRows(parentRows);
+          const childCsv = buildCsv(childRows, exportConfig.child.columns);
+          zip.file(exportConfig.child.filename || `${filenameBase}_items.csv`, childCsv);
+        }
+
+        if (exportConfig.attachments?.getItems) {
+          const items = exportConfig.attachments.getItems(parentRows);
+          const folder = zip.folder("attachments");
+          await Promise.all(
+            items.map(async (item) => {
+              if (!item?.url || !folder) return;
+              try {
+                const response = await fetch(item.url, { credentials: "include" });
+                if (!response.ok) return;
+                const blob = await response.blob();
+                const name = item.filename || item.url.split("/").pop() || "file";
+                folder.file(name, blob);
+              } catch (error) {
+                console.error("Failed to fetch attachment", error);
+              }
+            })
+          );
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(zipBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${exportConfig.filenameBase || "export"}.zip`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const blob = new Blob([parentCsv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = exportConfig.filename || "export.csv";
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  }, [buildCsv, exportConfig, isExporting, table]);
+
   return (
     <div className="space-y-3">
       {searchKey ? (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
             placeholder={searchPlaceholder}
             value={table.getColumn(searchKey)?.getFilterValue() ?? ""}
             onChange={(event) => table.getColumn(searchKey)?.setFilterValue(event.target.value)}
             className="max-w-xs"
           />
+          {exportConfig ? (
+            <Button type="button" variant="outline" onClick={handleExport} disabled={isExporting}>
+              {exportConfig.label || "Export"}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <div className="rounded-md border bg-background">

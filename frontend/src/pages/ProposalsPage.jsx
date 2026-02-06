@@ -17,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DatePicker } from "@/components/date-picker";
 import { Progress } from "@/components/ui/progress";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
+import { formatDate } from "@/utils/format";
+import { API_URL } from "@/api/client";
 
 export default function ProposalsPage({
   proposals,
@@ -43,6 +45,86 @@ export default function ProposalsPage({
 
   const safeClients = Array.isArray(clients) ? clients : [];
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
+  const clientMap = new Map(safeClients.map((client) => [client.id, client]));
+  const quoteMap = new Map(safeQuotes.map((quote) => [quote.id, quote]));
+  const exportColumns = [
+    { key: "display_id", header: "Proposal ID" },
+    { key: "client", header: "Client" },
+    { key: "quote", header: "Quote" },
+    { key: "title", header: "Title" },
+    { key: "status", header: "Status" },
+    { key: "submitted_on", header: "Submitted on" },
+    { key: "valid_until", header: "Valid until" },
+    { key: "summary", header: "Summary" },
+    { key: "approach", header: "Approach" },
+    { key: "timeline", header: "Timeline" },
+    { key: "content", header: "Content" },
+    { key: "requirements", header: "Requirements" },
+    { key: "attachments", header: "Attachments" },
+  ];
+  const requirementColumns = [
+    { key: "proposal_display_id", header: "Proposal ID" },
+    { key: "description", header: "Requirement" },
+  ];
+  const exportConfig = {
+    label: "Export proposals",
+    mode: "zip",
+    filenameBase: "proposals",
+    parent: {
+      columns: exportColumns,
+      mapRow: (proposal) => {
+        const client = clientMap.get(proposal.client_id);
+        const quote = quoteMap.get(proposal.quote_id);
+        const requirements = (proposal.requirements || [])
+          .map((item) => item.description)
+          .join(" ; ");
+        const attachments = (proposal.attachments || [])
+          .map((item) => item.filename || item.file_path || "")
+          .join(" ; ");
+        return {
+          display_id: proposal.display_id || "",
+          client: client?.company || client?.name || "",
+          quote: quote?.display_id || quote?.title || "",
+          title: proposal.title || "",
+          status: proposal.status || "",
+          submitted_on: formatDate(proposal.submitted_on),
+          valid_until: formatDate(proposal.valid_until),
+          summary: proposal.summary || "",
+          approach: proposal.approach || "",
+          timeline: proposal.timeline || "",
+          content: proposal.content || "",
+          requirements,
+          attachments,
+        };
+      },
+    },
+    child: {
+      filename: "proposal_requirements.csv",
+      columns: requirementColumns,
+      mapRows: (parentRows) =>
+        parentRows.flatMap((proposal) =>
+          (proposal.requirements || []).map((item) => ({
+            proposal_display_id: proposal.display_id || "",
+            description: item.description || "",
+          }))
+        ),
+    },
+    attachments: {
+      getItems: (parentRows) =>
+        parentRows.flatMap((proposal) =>
+          (proposal.attachments || []).map((item) => {
+            const filePath = item.file_path || "";
+            const url = filePath.startsWith("http")
+              ? filePath
+              : `${API_URL}/${filePath.replace(/^\//, "")}`;
+            return {
+              url,
+              filename: item.filename || filePath.split("/").pop() || "attachment",
+            };
+          })
+        ),
+    },
+  };
   const availableQuotes = proposalForm.client_id
     ? safeQuotes.filter((quote) => String(quote.client_id) === String(proposalForm.client_id))
     : safeQuotes;
@@ -134,6 +216,7 @@ export default function ProposalsPage({
             emptyMessage="No proposals yet."
             searchKey="title"
             searchPlaceholder="Search proposals..."
+            exportConfig={exportConfig}
           />
         </CardContent>
       </Card>
