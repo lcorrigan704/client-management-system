@@ -263,6 +263,12 @@ def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_rol
 
 @app.post("/admin/reset")
 def reset_data(db: Session = Depends(get_db), user=Depends(require_role(["owner", "admin"]))):
+    db.query(models.AgreementVersionCommentReaction).delete()
+    db.query(models.AgreementVersionComment).delete()
+    db.query(models.ProposalVersionCommentReaction).delete()
+    db.query(models.ProposalVersionComment).delete()
+    db.query(models.ServiceAgreementVersion).delete()
+    db.query(models.ProposalVersion).delete()
     db.query(models.ExpenseReceipt).delete()
     db.query(models.ProposalAttachment).delete()
     db.query(models.ProposalRequirement).delete()
@@ -390,6 +396,26 @@ def list_users(db: Session = Depends(get_db), user=Depends(require_role(["owner"
 @app.get("/auth/users/assignable", response_model=list[schemas.UserOut])
 def list_assignable_users(db: Session = Depends(get_db), user=Depends(require_user)):
     return crud.list_active_users(db)
+
+
+@app.get("/auth/users/search", response_model=list[schemas.UserSearchOut])
+def search_users(
+    q: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    term = q.strip()
+    if not term:
+        return []
+    results = (
+        db.query(models.User)
+        .filter(models.User.is_active == True)  # noqa: E712
+        .filter(models.User.email.ilike(f"%{term}%"))
+        .order_by(models.User.email.asc())
+        .limit(10)
+        .all()
+    )
+    return results
 
 
 @app.post("/auth/users", response_model=schemas.UserOut)
@@ -584,7 +610,12 @@ def list_agreements(db: Session = Depends(get_db)):
 
 
 @app.post("/clients/{client_id}/agreements", response_model=schemas.AgreementOut)
-def create_agreement(client_id: int, payload: schemas.AgreementCreate, db: Session = Depends(get_db)):
+def create_agreement(
+    client_id: int,
+    payload: schemas.AgreementCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     if not crud.get_client(db, client_id):
         raise HTTPException(status_code=404, detail="Client not found")
     if not payload.quote_id:
@@ -594,7 +625,7 @@ def create_agreement(client_id: int, payload: schemas.AgreementCreate, db: Sessi
         raise HTTPException(status_code=400, detail="Quote not found")
     if quote.client_id != client_id:
         raise HTTPException(status_code=400, detail="Quote does not belong to this client")
-    return crud.create_agreement(db, client_id, payload)
+    return crud.create_agreement(db, client_id, payload, user_id=user.id)
 
 
 @app.get("/agreements/{agreement_id}", response_model=schemas.AgreementOut)
@@ -606,7 +637,12 @@ def get_agreement(agreement_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/agreements/{agreement_id}", response_model=schemas.AgreementOut)
-def update_agreement(agreement_id: int, payload: schemas.AgreementUpdate, db: Session = Depends(get_db)):
+def update_agreement(
+    agreement_id: int,
+    payload: schemas.AgreementUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     agreement = db.query(models.ServiceAgreement).filter(models.ServiceAgreement.id == agreement_id).first()
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
@@ -616,7 +652,7 @@ def update_agreement(agreement_id: int, payload: schemas.AgreementUpdate, db: Se
             raise HTTPException(status_code=400, detail="Quote not found")
         if quote.client_id != agreement.client_id:
             raise HTTPException(status_code=400, detail="Quote does not belong to this client")
-    return crud.update_agreement(db, agreement, payload)
+    return crud.update_agreement(db, agreement, payload, user_id=user.id)
 
 
 @app.delete("/agreements/{agreement_id}")
@@ -629,13 +665,201 @@ def delete_agreement(agreement_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted"}
 
 
+@app.get("/agreements/{agreement_id}/versions", response_model=list[schemas.AgreementVersionOut])
+def list_agreement_versions(
+    agreement_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    agreement = db.query(models.ServiceAgreement).filter(models.ServiceAgreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+    versions = (
+        db.query(models.ServiceAgreementVersion)
+        .filter(models.ServiceAgreementVersion.agreement_id == agreement_id)
+        .order_by(models.ServiceAgreementVersion.version_number.desc())
+        .all()
+    )
+    for version in versions:
+        version.is_current = version.version_number == agreement.current_version
+    return versions
+
+
+@app.post("/agreements/{agreement_id}/versions/{version_id}/restore", response_model=schemas.AgreementOut)
+def restore_agreement_version(
+    agreement_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    agreement = db.query(models.ServiceAgreement).filter(models.ServiceAgreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+    version = (
+        db.query(models.ServiceAgreementVersion)
+        .filter(models.ServiceAgreementVersion.id == version_id)
+        .first()
+    )
+    if not version or version.agreement_id != agreement_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return crud.restore_agreement_version(db, agreement, version, user_id=user.id)
+
+
+@app.get("/agreements/versions/{version_id}/comments", response_model=list[schemas.AgreementCommentOut])
+def list_agreement_comments(
+    version_id: int,
+    field_key: str | None = None,
+    all_versions: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    version = (
+        db.query(models.ServiceAgreementVersion)
+        .filter(models.ServiceAgreementVersion.id == version_id)
+        .first()
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    query = db.query(models.AgreementVersionComment)
+    if all_versions:
+        query = query.join(
+            models.ServiceAgreementVersion,
+            models.AgreementVersionComment.agreement_version_id
+            == models.ServiceAgreementVersion.id,
+        ).filter(models.ServiceAgreementVersion.agreement_id == version.agreement_id)
+    else:
+        query = query.filter(models.AgreementVersionComment.agreement_version_id == version_id)
+    if field_key:
+        query = query.filter(models.AgreementVersionComment.field_key == field_key)
+    return query.order_by(models.AgreementVersionComment.created_at.asc()).all()
+
+
+@app.post("/agreements/versions/{version_id}/comments", response_model=schemas.AgreementCommentOut)
+def add_agreement_comment(
+    version_id: int,
+    payload: schemas.AgreementCommentCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = models.AgreementVersionComment(
+        agreement_version_id=version_id,
+        field_key=payload.field_key,
+        comment=payload.comment,
+        mentions=payload.mentions or [],
+        created_by_user_id=user.id,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.patch("/agreements/comments/{comment_id}", response_model=schemas.AgreementCommentOut)
+def update_agreement_comment_status(
+    comment_id: int,
+    payload: schemas.CommentStatusUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.AgreementVersionComment)
+        .filter(models.AgreementVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    comment.implemented = payload.implemented
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.delete("/agreements/comments/{comment_id}")
+def delete_agreement_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.AgreementVersionComment)
+        .filter(models.AgreementVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if comment.created_by_user_id != user.id and user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Not allowed to delete this comment")
+    db.delete(comment)
+    db.commit()
+    return {"detail": "Comment deleted"}
+
+
+@app.post("/agreements/comments/{comment_id}/reaction", response_model=schemas.AgreementCommentOut)
+def react_agreement_comment(
+    comment_id: int,
+    payload: schemas.CommentReactionRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.AgreementVersionComment)
+        .filter(models.AgreementVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    reaction = payload.reaction
+    existing = (
+        db.query(models.AgreementVersionCommentReaction)
+        .filter(
+            models.AgreementVersionCommentReaction.comment_id == comment_id,
+            models.AgreementVersionCommentReaction.user_id == user.id,
+        )
+        .first()
+    )
+    if existing and existing.reaction == reaction:
+        if reaction == "like":
+            comment.like_count = max(0, comment.like_count - 1)
+        else:
+            comment.dislike_count = max(0, comment.dislike_count - 1)
+        db.delete(existing)
+    elif existing:
+        if existing.reaction == "like":
+            comment.like_count = max(0, comment.like_count - 1)
+        else:
+            comment.dislike_count = max(0, comment.dislike_count - 1)
+        if reaction == "like":
+            comment.like_count += 1
+        else:
+            comment.dislike_count += 1
+        existing.reaction = reaction
+    else:
+        if reaction == "like":
+            comment.like_count += 1
+        else:
+            comment.dislike_count += 1
+        db.add(
+            models.AgreementVersionCommentReaction(
+                comment_id=comment_id, user_id=user.id, reaction=reaction
+            )
+        )
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
 @app.get("/proposals", response_model=list[schemas.ProposalOut])
 def list_proposals(db: Session = Depends(get_db)):
     return db.query(models.Proposal).order_by(models.Proposal.created_at.desc()).all()
 
 
 @app.post("/clients/{client_id}/proposals", response_model=schemas.ProposalOut)
-def create_proposal(client_id: int, payload: schemas.ProposalCreate, db: Session = Depends(get_db)):
+def create_proposal(
+    client_id: int,
+    payload: schemas.ProposalCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     if not crud.get_client(db, client_id):
         raise HTTPException(status_code=404, detail="Client not found")
     if not payload.quote_id:
@@ -645,7 +869,7 @@ def create_proposal(client_id: int, payload: schemas.ProposalCreate, db: Session
         raise HTTPException(status_code=400, detail="Quote not found")
     if quote.client_id != client_id:
         raise HTTPException(status_code=400, detail="Quote does not belong to this client")
-    return crud.create_proposal(db, client_id, payload)
+    return crud.create_proposal(db, client_id, payload, user_id=user.id)
 
 
 @app.get("/proposals/{proposal_id}", response_model=schemas.ProposalOut)
@@ -657,7 +881,12 @@ def get_proposal(proposal_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/proposals/{proposal_id}", response_model=schemas.ProposalOut)
-def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Session = Depends(get_db)):
+def update_proposal(
+    proposal_id: int,
+    payload: schemas.ProposalUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -667,7 +896,7 @@ def update_proposal(proposal_id: int, payload: schemas.ProposalUpdate, db: Sessi
             raise HTTPException(status_code=400, detail="Quote not found")
         if quote.client_id != proposal.client_id:
             raise HTTPException(status_code=400, detail="Quote does not belong to this client")
-    return crud.update_proposal(db, proposal, payload)
+    return crud.update_proposal(db, proposal, payload, user_id=user.id)
 
 
 @app.delete("/proposals/{proposal_id}")
@@ -678,6 +907,188 @@ def delete_proposal(proposal_id: int, db: Session = Depends(get_db)):
     db.delete(proposal)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.get("/proposals/{proposal_id}/versions", response_model=list[schemas.ProposalVersionOut])
+def list_proposal_versions(
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    versions = (
+        db.query(models.ProposalVersion)
+        .filter(models.ProposalVersion.proposal_id == proposal_id)
+        .order_by(models.ProposalVersion.version_number.desc())
+        .all()
+    )
+    for version in versions:
+        version.is_current = version.version_number == proposal.current_version
+    return versions
+
+
+@app.post("/proposals/{proposal_id}/versions/{version_id}/restore", response_model=schemas.ProposalOut)
+def restore_proposal_version(
+    proposal_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    proposal = db.query(models.Proposal).filter(models.Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    version = (
+        db.query(models.ProposalVersion)
+        .filter(models.ProposalVersion.id == version_id)
+        .first()
+    )
+    if not version or version.proposal_id != proposal_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return crud.restore_proposal_version(db, proposal, version, user_id=user.id)
+
+
+@app.get("/proposals/versions/{version_id}/comments", response_model=list[schemas.ProposalCommentOut])
+def list_proposal_comments(
+    version_id: int,
+    field_key: str | None = None,
+    all_versions: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    version = (
+        db.query(models.ProposalVersion)
+        .filter(models.ProposalVersion.id == version_id)
+        .first()
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    query = db.query(models.ProposalVersionComment)
+    if all_versions:
+        query = query.join(
+            models.ProposalVersion,
+            models.ProposalVersionComment.proposal_version_id == models.ProposalVersion.id,
+        ).filter(models.ProposalVersion.proposal_id == version.proposal_id)
+    else:
+        query = query.filter(models.ProposalVersionComment.proposal_version_id == version_id)
+    if field_key:
+        query = query.filter(models.ProposalVersionComment.field_key == field_key)
+    return query.order_by(models.ProposalVersionComment.created_at.asc()).all()
+
+
+@app.post("/proposals/versions/{version_id}/comments", response_model=schemas.ProposalCommentOut)
+def add_proposal_comment(
+    version_id: int,
+    payload: schemas.ProposalCommentCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = models.ProposalVersionComment(
+        proposal_version_id=version_id,
+        field_key=payload.field_key,
+        comment=payload.comment,
+        mentions=payload.mentions or [],
+        created_by_user_id=user.id,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.patch("/proposals/comments/{comment_id}", response_model=schemas.ProposalCommentOut)
+def update_proposal_comment_status(
+    comment_id: int,
+    payload: schemas.CommentStatusUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.ProposalVersionComment)
+        .filter(models.ProposalVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    comment.implemented = payload.implemented
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.delete("/proposals/comments/{comment_id}")
+def delete_proposal_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.ProposalVersionComment)
+        .filter(models.ProposalVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if comment.created_by_user_id != user.id and user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Not allowed to delete this comment")
+    db.delete(comment)
+    db.commit()
+    return {"detail": "Comment deleted"}
+
+
+@app.post("/proposals/comments/{comment_id}/reaction", response_model=schemas.ProposalCommentOut)
+def react_proposal_comment(
+    comment_id: int,
+    payload: schemas.CommentReactionRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    comment = (
+        db.query(models.ProposalVersionComment)
+        .filter(models.ProposalVersionComment.id == comment_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    reaction = payload.reaction
+    existing = (
+        db.query(models.ProposalVersionCommentReaction)
+        .filter(
+            models.ProposalVersionCommentReaction.comment_id == comment_id,
+            models.ProposalVersionCommentReaction.user_id == user.id,
+        )
+        .first()
+    )
+    if existing and existing.reaction == reaction:
+        if reaction == "like":
+            comment.like_count = max(0, comment.like_count - 1)
+        else:
+            comment.dislike_count = max(0, comment.dislike_count - 1)
+        db.delete(existing)
+    elif existing:
+        if existing.reaction == "like":
+            comment.like_count = max(0, comment.like_count - 1)
+        else:
+            comment.dislike_count = max(0, comment.dislike_count - 1)
+        if reaction == "like":
+            comment.like_count += 1
+        else:
+            comment.dislike_count += 1
+        existing.reaction = reaction
+    else:
+        if reaction == "like":
+            comment.like_count += 1
+        else:
+            comment.dislike_count += 1
+        db.add(
+            models.ProposalVersionCommentReaction(
+                comment_id=comment_id, user_id=user.id, reaction=reaction
+            )
+        )
+    db.commit()
+    db.refresh(comment)
+    return comment
 
 
 @app.post("/proposals/uploads")

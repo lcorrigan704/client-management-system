@@ -78,6 +78,38 @@ const api = {
   updateAgreement: (id, payload) =>
     request(`/agreements/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteAgreement: (id) => request(`/agreements/${id}`, { method: "DELETE" }),
+  listAgreementVersions: (id) => request(`/agreements/${id}/versions`),
+  restoreAgreementVersion: (agreementId, versionId) =>
+    request(`/agreements/${agreementId}/versions/${versionId}/restore`, { method: "POST" }),
+  listAgreementComments: (versionId, fieldKey) =>
+    request(
+      `/agreements/versions/${versionId}/comments${
+        fieldKey ? `?field_key=${encodeURIComponent(fieldKey)}` : ""
+      }`
+    ),
+  listAgreementCommentsAll: (versionId, fieldKey) =>
+    request(
+      `/agreements/versions/${versionId}/comments?all_versions=1${
+        fieldKey ? `&field_key=${encodeURIComponent(fieldKey)}` : ""
+      }`
+    ),
+  addAgreementComment: (versionId, payload) =>
+    request(`/agreements/versions/${versionId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  reactAgreementComment: (commentId, payload) =>
+    request(`/agreements/comments/${commentId}/reaction`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAgreementCommentStatus: (commentId, payload) =>
+    request(`/agreements/comments/${commentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteAgreementComment: (commentId) =>
+    request(`/agreements/comments/${commentId}`, { method: "DELETE" }),
   createProposal: (clientId, payload) =>
     request(`/clients/${clientId}/proposals`, {
       method: "POST",
@@ -86,6 +118,38 @@ const api = {
   updateProposal: (id, payload) =>
     request(`/proposals/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteProposal: (id) => request(`/proposals/${id}`, { method: "DELETE" }),
+  listProposalVersions: (id) => request(`/proposals/${id}/versions`),
+  restoreProposalVersion: (proposalId, versionId) =>
+    request(`/proposals/${proposalId}/versions/${versionId}/restore`, { method: "POST" }),
+  listProposalComments: (versionId, fieldKey) =>
+    request(
+      `/proposals/versions/${versionId}/comments${
+        fieldKey ? `?field_key=${encodeURIComponent(fieldKey)}` : ""
+      }`
+    ),
+  listProposalCommentsAll: (versionId, fieldKey) =>
+    request(
+      `/proposals/versions/${versionId}/comments?all_versions=1${
+        fieldKey ? `&field_key=${encodeURIComponent(fieldKey)}` : ""
+      }`
+    ),
+  addProposalComment: (versionId, payload) =>
+    request(`/proposals/versions/${versionId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  reactProposalComment: (commentId, payload) =>
+    request(`/proposals/comments/${commentId}/reaction`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateProposalCommentStatus: (commentId, payload) =>
+    request(`/proposals/comments/${commentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProposalComment: (commentId) =>
+    request(`/proposals/comments/${commentId}`, { method: "DELETE" }),
   uploadProposalAssets: (files) => {
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
@@ -150,6 +214,7 @@ const api = {
   authLogout: () => request("/auth/logout", { method: "POST" }),
   listUsers: () => request("/auth/users"),
   listAssignableUsers: () => request("/auth/users/assignable"),
+  searchUsers: (query) => request(`/auth/users/search?q=${encodeURIComponent(query)}`),
   createUser: (payload) =>
     request("/auth/users", { method: "POST", body: JSON.stringify(payload) }),
   updateUser: (id, payload) =>

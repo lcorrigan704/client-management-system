@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/data-table";
 import {
   Dialog,
@@ -18,7 +20,10 @@ import { DatePicker } from "@/components/date-picker";
 import { Progress } from "@/components/ui/progress";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
 import { formatDate } from "@/utils/format";
-import { API_URL } from "@/api/client";
+import { API_URL, api } from "@/api/client";
+import FieldCommentsDialog from "@/components/field-comments-dialog";
+import { parseISO } from "date-fns";
+import { MessageSquare } from "lucide-react";
 
 export default function ProposalsPage({
   proposals,
@@ -35,13 +40,33 @@ export default function ProposalsPage({
   handleProposalUpload,
   onBulkDelete,
   onBulkSendReminder,
+  onReload,
+  currentUserEmail,
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
+  const [versions, setVersions] = useState([]);
+  const [commentDialog, setCommentDialog] = useState({ open: false, fieldKey: "", fieldLabel: "" });
+  const [commentCounts, setCommentCounts] = useState({});
+  const [prefetchedComments, setPrefetchedComments] = useState({});
+  const [initialSnapshot, setInitialSnapshot] = useState(null);
 
   useEffect(() => {
     if (proposalDialogOpen) {
       setStepIndex(0);
+      if (editingProposalId) {
+        setInitialSnapshot(normalizeProposal(proposalForm));
+      } else {
+        setInitialSnapshot(null);
+      }
+    } else {
+      setVersions([]);
+      setVersionDialogOpen(false);
+      setCommentDialog({ open: false, fieldKey: "", fieldLabel: "" });
+      setCommentCounts({});
+      setPrefetchedComments({});
+      setInitialSnapshot(null);
     }
   }, [proposalDialogOpen, editingProposalId]);
 
@@ -49,6 +74,7 @@ export default function ProposalsPage({
   const safeQuotes = Array.isArray(quotes) ? quotes : [];
   const clientMap = new Map(safeClients.map((client) => [client.id, client]));
   const quoteMap = new Map(safeQuotes.map((quote) => [quote.id, quote]));
+  const currentVersionId = versions.find((version) => version.is_current)?.id;
   const exportColumns = [
     { key: "display_id", header: "Proposal ID" },
     { key: "client", header: "Client" },
@@ -194,6 +220,141 @@ export default function ProposalsPage({
     setProposalForm({ ...proposalForm, attachments: nextAttachments });
   };
 
+  useEffect(() => {
+    if (!proposalDialogOpen || !editingProposalId) return;
+    const loadVersions = async () => {
+      try {
+        const data = await api.listProposalVersions(editingProposalId);
+        setVersions(data || []);
+      } catch (error) {
+        toast.error(error.message || "Unable to load proposal versions.");
+      }
+    };
+    loadVersions();
+  }, [proposalDialogOpen, editingProposalId]);
+
+  const loadCommentCounts = async (versionId) => {
+    if (!versionId) return;
+    try {
+      const data = await api.listProposalComments(versionId);
+      const counts = (data || []).reduce((acc, comment) => {
+        const key = comment.field_key || "unknown";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+      setCommentCounts(counts);
+    } catch (error) {
+      toast.error(error.message || "Unable to load comment counts.");
+    }
+  };
+
+  useEffect(() => {
+    if (!proposalDialogOpen || !currentVersionId) return;
+    loadCommentCounts(currentVersionId);
+    setPrefetchedComments({});
+  }, [proposalDialogOpen, currentVersionId]);
+
+  const prefetchComments = async (fieldKey) => {
+    if (!currentVersionId || prefetchedComments[fieldKey]) return;
+    try {
+      const data = await api.listProposalComments(currentVersionId, fieldKey);
+      setPrefetchedComments((prev) => ({ ...prev, [fieldKey]: data || [] }));
+    } catch (error) {
+      toast.error(error.message || "Unable to prefetch comments.");
+    }
+  };
+
+  const normalizeProposal = (form) => ({
+    client_id: form.client_id || "",
+    display_id: (form.display_id || "").trim(),
+    quote_id: form.quote_id || "",
+    title: (form.title || "").trim(),
+    status: form.status || "draft",
+    submitted_on: form.submitted_on ? form.submitted_on.toISOString() : null,
+    valid_until: form.valid_until ? form.valid_until.toISOString() : null,
+    summary: (form.summary || "").trim(),
+    approach: (form.approach || "").trim(),
+    timeline: (form.timeline || "").trim(),
+    content: (form.content || "").trim(),
+    requirements: (form.requirements || []).map((item) => ({
+      description: (item.description || "").trim(),
+    })),
+    attachments: (form.attachments || []).map((item) => ({
+      filename: item.filename || "",
+      file_path: item.file_path || "",
+    })),
+  });
+
+  const isProposalDirty = () => {
+    if (!editingProposalId || !initialSnapshot) return true;
+    const current = normalizeProposal(proposalForm);
+    return JSON.stringify(current) !== JSON.stringify(initialSnapshot);
+  };
+
+  const handleRestoreVersion = async (versionId) => {
+    if (!editingProposalId) return;
+    try {
+      await api.restoreProposalVersion(editingProposalId, versionId);
+      toast.success("Proposal version restored.");
+      await onReload?.();
+      const proposalsList = await api.getProposals();
+      const restored = proposalsList?.find((item) => item.id === editingProposalId);
+      if (restored) {
+        const nextForm = {
+          client_id: String(restored.client_id),
+          title: restored.title,
+          status: restored.status || "draft",
+          display_id: restored.display_id || "",
+          quote_id: restored.quote_id ? String(restored.quote_id) : "",
+          submitted_on: restored.submitted_on ? parseISO(restored.submitted_on) : null,
+          valid_until: restored.valid_until ? parseISO(restored.valid_until) : null,
+          summary: restored.summary || "",
+          approach: restored.approach || "",
+          timeline: restored.timeline || "",
+          content: restored.content || "",
+          current_version: restored.current_version || 1,
+          updated_at: restored.updated_at || null,
+          updated_by_email: restored.updated_by_email || "",
+          requirements:
+            restored.requirements?.map((item) => ({
+              description: item.description,
+            })) || [{ description: "" }],
+          attachments: restored.attachments || [],
+        };
+        setProposalForm(nextForm);
+        setInitialSnapshot(normalizeProposal(nextForm));
+      }
+      const data = await api.listProposalVersions(editingProposalId);
+      setVersions(data || []);
+      await loadCommentCounts(data?.find((item) => item.is_current)?.id);
+    } catch (error) {
+      toast.error(error.message || "Unable to restore version.");
+    }
+  };
+
+  const renderLabel = (label, fieldKey) => (
+    <div className="flex items-center justify-between">
+      <label className={labelClass}>{label}</label>
+      <div className="inline-flex items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setCommentDialog({ open: true, fieldKey, fieldLabel: label })}
+          onMouseEnter={() => prefetchComments(fieldKey)}
+          disabled={!currentVersionId}
+        >
+          <MessageSquare className="h-4 w-4" />
+        </Button>
+        {commentCounts[fieldKey] ? (
+          <Badge className="h-5 min-w-5 justify-center px-1.5 text-[10px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+            {commentCounts[fieldKey]}
+          </Badge>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -253,15 +414,35 @@ export default function ProposalsPage({
           <DialogHeader>
             <DialogTitle>{editingProposalId ? "Edit proposal" : "New proposal"}</DialogTitle>
             <DialogDescription>Capture the proposal details, requirements, and attachments.</DialogDescription>
+            {editingProposalId ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>Current version v{proposalForm.current_version || 1}</span>
+                  {editingProposalId && isProposalDirty() ? (
+                    <Badge className="bg-rose-500/15 text-rose-700 dark:text-rose-300">
+                      Unsaved changes
+                    </Badge>
+                  ) : null}
+                </div>
+                <span>
+                  Last updated {formatDate(proposalForm.updated_at)}
+                  {proposalForm.updated_by_email ? ` by ${proposalForm.updated_by_email}` : ""}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setVersionDialogOpen(true)}
+                >
+                  Version history
+                </Button>
+              </div>
+            ) : null}
           </DialogHeader>
           <form
             className="space-y-4"
             onSubmit={(event) => {
-              if (stepIndex < steps.length - 1) {
-                event.preventDefault();
-                return;
-              }
-              handleProposalSubmit(event);
+              event.preventDefault();
             }}
           >
             <div className="space-y-3">
@@ -277,7 +458,7 @@ export default function ProposalsPage({
             {stepIndex === 0 && (
               <div className="space-y-4">
                 <div className={fieldClass}>
-                  <label className={labelClass}>Custom proposal ID (optional)</label>
+                  {renderLabel("Custom proposal ID (optional)", "display_id")}
                   <Input
                     value={proposalForm.display_id || ""}
                     onChange={(event) =>
@@ -287,7 +468,7 @@ export default function ProposalsPage({
                   />
                 </div>
                 <div className={fieldClass}>
-                  <label className={labelClass}>Client</label>
+                  {renderLabel("Client", "client_id")}
                   <Select
                     value={proposalForm.client_id}
                     onValueChange={(value) =>
@@ -314,7 +495,7 @@ export default function ProposalsPage({
                   </Select>
                 </div>
                 <div className={fieldClass}>
-                  <label className={labelClass}>Quote</label>
+                  {renderLabel("Quote", "quote_id")}
                   <Select
                     value={proposalForm.quote_id}
                     onValueChange={(value) => setProposalForm({ ...proposalForm, quote_id: value })}
@@ -339,7 +520,7 @@ export default function ProposalsPage({
                 </div>
                 <div className={gridTwo}>
                   <div className={fieldClass}>
-                    <label className={labelClass}>Title</label>
+                    {renderLabel("Title", "title")}
                     <Input
                       value={proposalForm.title}
                       onChange={(event) =>
@@ -349,7 +530,7 @@ export default function ProposalsPage({
                     />
                   </div>
                   <div className={fieldClass}>
-                    <label className={labelClass}>Status</label>
+                    {renderLabel("Status", "status")}
                     <Select
                       value={proposalForm.status}
                       onValueChange={(value) => setProposalForm({ ...proposalForm, status: value })}
@@ -368,7 +549,7 @@ export default function ProposalsPage({
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className={fieldClass}>
-                    <label className={labelClass}>Submitted on</label>
+                    {renderLabel("Submitted on", "submitted_on")}
                     <DatePicker
                       value={proposalForm.submitted_on}
                       onChange={(value) =>
@@ -378,7 +559,7 @@ export default function ProposalsPage({
                     />
                   </div>
                   <div className={fieldClass}>
-                    <label className={labelClass}>Valid until</label>
+                    {renderLabel("Valid until", "valid_until")}
                     <DatePicker
                       value={proposalForm.valid_until}
                       onChange={(value) =>
@@ -394,7 +575,7 @@ export default function ProposalsPage({
             {stepIndex === 1 && (
               <div className="space-y-4">
                 <div className={fieldClass}>
-                  <label className={labelClass}>Summary</label>
+                  {renderLabel("Summary", "summary")}
                   <Textarea
                     rows={4}
                     value={proposalForm.summary}
@@ -404,7 +585,7 @@ export default function ProposalsPage({
                   />
                 </div>
                 <div className={fieldClass}>
-                  <label className={labelClass}>Approach</label>
+                  {renderLabel("Approach", "approach")}
                   <Textarea
                     rows={5}
                     value={proposalForm.approach}
@@ -419,7 +600,7 @@ export default function ProposalsPage({
             {stepIndex === 2 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <label className={labelClass}>Requirements</label>
+                  {renderLabel("Requirements", "requirements")}
                   <Button type="button" variant="outline" size="sm" onClick={addRequirement}>
                     Add requirement
                   </Button>
@@ -444,7 +625,7 @@ export default function ProposalsPage({
             {stepIndex === 3 && (
               <div className="space-y-4">
                 <div className={fieldClass}>
-                  <label className={labelClass}>Timeline</label>
+                  {renderLabel("Timeline", "timeline")}
                   <Textarea
                     rows={4}
                     value={proposalForm.timeline}
@@ -454,7 +635,7 @@ export default function ProposalsPage({
                   />
                 </div>
                 <div className={fieldClass}>
-                  <label className={labelClass}>Additional notes</label>
+                  {renderLabel("Additional notes", "content")}
                   <Textarea
                     rows={4}
                     value={proposalForm.content}
@@ -464,7 +645,7 @@ export default function ProposalsPage({
                   />
                 </div>
                 <div className={fieldClass}>
-                  <label className={labelClass}>Supporting documentation</label>
+                  {renderLabel("Supporting documentation", "attachments")}
                   <Input type="file" accept="image/*" multiple onChange={handleFilesSelected} />
                   {uploading && (
                     <p className="text-xs text-muted-foreground">Uploading…</p>
@@ -518,7 +699,18 @@ export default function ProposalsPage({
                     Next
                   </Button>
                 ) : (
-                  <Button type="submit">
+                  <Button
+                    type="button"
+                    onClick={(event) => {
+                      if (editingProposalId && !isProposalDirty()) {
+                        toast.info("No changes to save.");
+                        setProposalDialogOpen(false);
+                        return;
+                      }
+                      handleProposalSubmit(event);
+                    }}
+                    disabled={editingProposalId ? !isProposalDirty() : false}
+                  >
                     {editingProposalId ? "Update proposal" : "Create proposal"}
                   </Button>
                 )}
@@ -527,6 +719,59 @@ export default function ProposalsPage({
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={versionDialogOpen} onOpenChange={setVersionDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Proposal versions</DialogTitle>
+            <DialogDescription>Review or restore previous versions.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {versions.length ? (
+              versions.map((version) => (
+                <div
+                  key={version.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-foreground">
+                      v{version.version_number}
+                      {version.is_current ? " · Current" : ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(version.created_at)}
+                      {version.created_by_email ? ` · ${version.created_by_email}` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={version.is_current}
+                    onClick={() => handleRestoreVersion(version.id)}
+                  >
+                    Restore
+                  </Button>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No versions yet.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <FieldCommentsDialog
+        open={commentDialog.open}
+        onOpenChange={(open) => setCommentDialog((prev) => ({ ...prev, open }))}
+        entityType="proposal"
+        versionId={currentVersionId}
+        fieldKey={commentDialog.fieldKey}
+        fieldLabel={commentDialog.fieldLabel}
+        currentUserEmail={currentUserEmail}
+        onCommentsUpdated={() => loadCommentCounts(currentVersionId)}
+        initialComments={prefetchedComments[commentDialog.fieldKey]}
+      />
     </section>
   );
 }
