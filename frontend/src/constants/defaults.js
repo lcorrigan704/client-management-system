@@ -21,6 +21,14 @@ const emptyInvoice = {
   due_date: null,
   notes: "",
   line_items: [{ description: "", quantity: 1, unit_amount: "" }],
+  issued_at: null,
+  recurrence_enabled: false,
+  recurrence_frequency: "monthly",
+  recurrence_count: 1,
+  recurrence_day_of_month: "",
+  due_rule_unit: "days",
+  due_rule_value: 30,
+  send_now: false,
 };
 
 const emptyQuote = {

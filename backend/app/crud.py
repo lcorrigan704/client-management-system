@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -175,6 +175,13 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
     line_items = data.pop("line_items", None)
     display_id = (data.pop("display_id", None) or "").strip()
     is_legacy = data.pop("is_legacy", None)
+    recurrence_enabled = bool(data.pop("recurrence_enabled", False))
+    recurrence_frequency = data.pop("recurrence_frequency", None)
+    recurrence_count = data.pop("recurrence_count", None)
+    recurrence_day_of_month = data.pop("recurrence_day_of_month", None)
+    due_rule_unit = data.pop("due_rule_unit", None)
+    due_rule_value = data.pop("due_rule_value", None)
+    send_now = bool(data.pop("send_now", False))
     quote_id = data.get("quote_id")
     if quote_id:
         quote = db.query(models.Quote).filter(models.Quote.id == quote_id).first()
@@ -189,36 +196,138 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
                 }
                 for item in quote.line_items
             ]
-    invoice = models.Invoice(client_id=client_id, **data)
-    db.add(invoice)
-    db.commit()
-    db.refresh(invoice)
-    settings = get_or_create_settings(db)
-    if line_items:
-        invoice.line_items = [
-            models.InvoiceLineItem(
-                description=item["description"],
-                quantity=item["quantity"],
-                unit_amount=item["unit_amount"],
+
+    def add_months(base_date: datetime, months: int, day_override: int | None = None) -> datetime:
+        import calendar
+        month = base_date.month - 1 + months
+        year = base_date.year + month // 12
+        month = month % 12 + 1
+        day = day_override or base_date.day
+        last_day = calendar.monthrange(year, month)[1]
+        return base_date.replace(year=year, month=month, day=min(day, last_day))
+
+    def compute_due_date(issue_date: datetime) -> datetime | None:
+        if due_rule_unit and due_rule_value:
+            if due_rule_unit == "days":
+                return issue_date + timedelta(days=due_rule_value)
+            if due_rule_unit == "weeks":
+                return issue_date + timedelta(weeks=due_rule_value)
+            if due_rule_unit == "months":
+                return add_months(issue_date, due_rule_value)
+        return None
+
+    def build_invoice(
+        issue_date: datetime,
+        due_date: datetime | None,
+        status_override: str | None = None,
+        display_id_override: str | None = None,
+        legacy_override: bool | None = None,
+    ) -> models.Invoice:
+        invoice = models.Invoice(client_id=client_id, **data)
+        invoice.issued_at = issue_date
+        if due_date:
+            invoice.due_date = due_date
+        if status_override:
+            invoice.status = status_override
+        db.add(invoice)
+        db.commit()
+        db.refresh(invoice)
+        if line_items:
+            invoice.line_items = [
+                models.InvoiceLineItem(
+                    description=item["description"],
+                    quantity=item["quantity"],
+                    unit_amount=item["unit_amount"],
+                )
+                for item in line_items
+            ]
+            invoice.amount = sum(
+                float(item.quantity) * float(item.unit_amount) for item in invoice.line_items
             )
-            for item in line_items
-        ]
-        invoice.amount = sum(
-            float(item.quantity) * float(item.unit_amount) for item in invoice.line_items
-        )
-        db.commit()
-        db.refresh(invoice)
-    if not invoice.display_id:
-        if display_id:
-            ensure_display_id_unique(db, models.Invoice, display_id)
-            invoice.display_id = display_id
-            invoice.is_legacy = True if is_legacy is None else bool(is_legacy)
-        else:
-            invoice.display_id = build_display_id(settings.invoice_prefix, invoice.id)
-            invoice.is_legacy = False
-        db.commit()
-        db.refresh(invoice)
-    return invoice
+            db.commit()
+            db.refresh(invoice)
+        if not invoice.display_id:
+            settings = get_or_create_settings(db)
+            chosen_display_id = display_id_override or display_id
+            if chosen_display_id:
+                ensure_display_id_unique(db, models.Invoice, chosen_display_id)
+                invoice.display_id = chosen_display_id
+                if legacy_override is None:
+                    invoice.is_legacy = True if is_legacy is None else bool(is_legacy)
+                else:
+                    invoice.is_legacy = bool(legacy_override)
+            else:
+                invoice.display_id = build_display_id(settings.invoice_prefix, invoice.id)
+                if legacy_override is None:
+                    invoice.is_legacy = False
+                else:
+                    invoice.is_legacy = bool(legacy_override)
+            db.commit()
+            db.refresh(invoice)
+        return invoice
+
+    issued_at = data.get("issued_at") or datetime.utcnow()
+    due_date = data.get("due_date")
+    if not due_rule_unit and not due_rule_value and due_date:
+        due_offset = due_date - issued_at
+    else:
+        due_offset = None
+
+    first_invoice = None
+    if recurrence_enabled:
+        if not recurrence_frequency or not recurrence_count:
+            raise ValueError("Recurrence frequency and count are required.")
+        if recurrence_count < 1:
+            raise ValueError("Recurrence count must be at least 1.")
+        frequency = recurrence_frequency
+        day_of_month = recurrence_day_of_month or issued_at.day
+        created = None
+        for index in range(recurrence_count):
+            if index == 0:
+                issue_date = issued_at
+            else:
+                if frequency == "weekly":
+                    issue_date = issued_at + timedelta(weeks=index)
+                elif frequency == "monthly":
+                    issue_date = add_months(issued_at, index, day_of_month)
+                elif frequency == "quarterly":
+                    issue_date = add_months(issued_at, index * 3, day_of_month)
+                elif frequency == "annually":
+                    issue_date = add_months(issued_at, index * 12, day_of_month)
+                else:
+                    raise ValueError("Unsupported recurrence frequency.")
+
+            if due_rule_unit and due_rule_value:
+                next_due = compute_due_date(issue_date)
+            elif due_offset is not None:
+                next_due = issue_date + due_offset
+            else:
+                next_due = None
+            status_override = "sent" if index == 0 and send_now else None
+            display_id_override = display_id if index == 0 else None
+            legacy_override = bool(is_legacy) if index == 0 and display_id else None
+            created = build_invoice(
+                issue_date,
+                next_due,
+                status_override=status_override,
+                display_id_override=display_id_override,
+                legacy_override=legacy_override,
+            )
+            if index == 0:
+                first_invoice = created
+        return created, first_invoice
+
+    status_override = "sent" if send_now else None
+    created = build_invoice(
+        issued_at,
+        compute_due_date(issued_at) or due_date,
+        status_override=status_override,
+        display_id_override=display_id,
+        legacy_override=bool(is_legacy) if display_id else None,
+    )
+    if send_now:
+        first_invoice = created
+    return created, first_invoice
 
 
 def update_invoice(db: Session, invoice: models.Invoice, payload: schemas.InvoiceUpdate):

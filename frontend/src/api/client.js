@@ -47,6 +47,7 @@ const api = {
   getSettings: () => request("/settings"),
   saveSettings: (settings) =>
     request("/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  testSmtp: () => request("/settings/smtp/test", { method: "POST" }),
   createClient: (payload) =>
     request("/clients", { method: "POST", body: JSON.stringify(payload) }),
   updateClient: (id, payload) =>

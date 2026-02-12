@@ -23,6 +23,7 @@ export default function AgreementsPage({
   editingAgreementId,
   resetAgreementForm,
   handleAgreementSubmit,
+  onBulkDelete,
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const safeClients = Array.isArray(clients) ? clients : [];
@@ -177,6 +178,20 @@ export default function AgreementsPage({
             searchKey="title"
             searchPlaceholder="Search agreements..."
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected agreements?",
+                  description:
+                    "This action cannot be undone. The selected agreements will be permanently removed.",
+                  confirmLabel: "Delete agreements",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>

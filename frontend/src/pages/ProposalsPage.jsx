@@ -33,6 +33,8 @@ export default function ProposalsPage({
   resetProposalForm,
   handleProposalSubmit,
   handleProposalUpload,
+  onBulkDelete,
+  onBulkSendReminder,
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -217,6 +219,31 @@ export default function ProposalsPage({
             searchKey="title"
             searchPlaceholder="Search proposals..."
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Send reminders",
+                variant: "outline",
+                onClick: (rows) => onBulkSendReminder?.(rows),
+                confirm: {
+                  title: "Send proposal reminders?",
+                  description:
+                    "This will send reminder emails for the selected proposals using SMTP.",
+                  confirmLabel: "Send reminders",
+                },
+              },
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected proposals?",
+                  description:
+                    "This action cannot be undone. The selected proposals will be permanently removed.",
+                  confirmLabel: "Delete proposals",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>

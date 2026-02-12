@@ -32,6 +32,7 @@ export default function ExpensesPage({
   resetExpenseForm,
   handleExpenseSubmit,
   handleExpenseUpload,
+  onBulkDelete,
 }) {
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const userMap = new Map(users.map((person) => [person.id, person]));
@@ -156,6 +157,20 @@ export default function ExpensesPage({
             totalLabel="Total expenses"
             formatTotal={formatGBP}
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected expenses?",
+                  description:
+                    "This action cannot be undone. The selected expenses will be permanently removed.",
+                  confirmLabel: "Delete expenses",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>

@@ -50,6 +50,7 @@ class InvoiceBase(BaseModel):
     title: str
     amount: float
     status: Optional[str] = "draft"
+    issued_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
     quote_id: Optional[int] = None
@@ -71,12 +72,20 @@ class InvoiceCreate(InvoiceBase):
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
     line_items: Optional[list[LineItemBase]] = None
+    recurrence_enabled: Optional[bool] = None
+    recurrence_frequency: Optional[str] = None
+    recurrence_count: Optional[int] = None
+    recurrence_day_of_month: Optional[int] = None
+    due_rule_unit: Optional[str] = None
+    due_rule_value: Optional[int] = None
+    send_now: Optional[bool] = None
 
 
 class InvoiceUpdate(BaseModel):
     title: Optional[str] = None
     amount: Optional[float] = None
     status: Optional[str] = None
+    issued_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     paid_at: Optional[datetime] = None
     notes: Optional[str] = None

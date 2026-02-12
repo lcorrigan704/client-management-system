@@ -20,6 +20,8 @@ export default function QuotesPage({
   editingQuoteId,
   resetQuoteForm,
   handleQuoteSubmit,
+  onBulkDelete,
+  onBulkSendReminder,
   emptyQuote,
 }) {
   const clientMap = new Map(clients.map((client) => [client.id, client]));
@@ -115,6 +117,31 @@ export default function QuotesPage({
             totalLabel="Total quoted"
             formatTotal={formatGBP}
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Send reminders",
+                variant: "outline",
+                onClick: (rows) => onBulkSendReminder?.(rows),
+                confirm: {
+                  title: "Send quote reminders?",
+                  description:
+                    "This will send reminder emails for the selected quotes using SMTP.",
+                  confirmLabel: "Send reminders",
+                },
+              },
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected quotes?",
+                  description:
+                    "This action cannot be undone. The selected quotes will be permanently removed.",
+                  confirmLabel: "Delete quotes",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>

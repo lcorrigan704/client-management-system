@@ -59,6 +59,10 @@ export default function App() {
     (message) => toast.success(message),
     []
   );
+  const handleEmailSendSuccess = useCallback(
+    (message) => toast.success(message),
+    []
+  );
   const handleEmailCopyError = useCallback(
     (error) => toast.error(error.message || "Unable to copy email body."),
     []
@@ -142,6 +146,7 @@ export default function App() {
     onError: handleEmailError,
     onCopySuccess: handleEmailCopySuccess,
     onCopyError: handleEmailCopyError,
+    onSendSuccess: handleEmailSendSuccess,
     isActive: view === "emails",
   });
 
@@ -269,6 +274,15 @@ export default function App() {
       } else {
         handleSettingsSaved("Backup created.");
       }
+    } catch (error) {
+      handleSettingsError(error);
+    }
+  }, [handleSettingsError, handleSettingsSaved]);
+
+  const handleTestSmtp = useCallback(async () => {
+    try {
+      const response = await api.testSmtp();
+      handleSettingsSaved(response?.message || "SMTP connection successful.");
     } catch (error) {
       handleSettingsError(error);
     }
@@ -440,6 +454,10 @@ export default function App() {
   const handleInvoiceSubmit = async (event) => {
     event.preventDefault();
     try {
+      if (invoiceForm.recurrence_enabled && !invoiceForm.issued_at) {
+        toast.error("Please select an invoice date for the schedule.");
+        return;
+      }
       const lineItems = invoiceForm.line_items.filter(
         (item) => item.description && item.unit_amount !== ""
       );
@@ -451,11 +469,27 @@ export default function App() {
         title: invoiceForm.title,
         amount: Number(computedTotal || 0),
         status: invoiceForm.status,
+        issued_at: toDateTime(invoiceForm.issued_at),
         due_date: toDateTime(invoiceForm.due_date),
         notes: invoiceForm.notes || null,
         quote_id: invoiceForm.quote_id ? Number(invoiceForm.quote_id) : null,
         display_id: invoiceForm.is_legacy ? invoiceForm.display_id || null : null,
         is_legacy: invoiceForm.is_legacy,
+        recurrence_enabled: invoiceForm.recurrence_enabled,
+        recurrence_frequency: invoiceForm.recurrence_enabled
+          ? invoiceForm.recurrence_frequency
+          : null,
+        recurrence_count: invoiceForm.recurrence_enabled
+          ? Number(invoiceForm.recurrence_count || 1)
+          : null,
+        recurrence_day_of_month: invoiceForm.recurrence_enabled
+          ? Number(invoiceForm.recurrence_day_of_month || 0) || null
+          : null,
+        due_rule_unit: invoiceForm.recurrence_enabled ? invoiceForm.due_rule_unit : null,
+        due_rule_value: invoiceForm.recurrence_enabled
+          ? Number(invoiceForm.due_rule_value || 0) || null
+          : null,
+        send_now: invoiceForm.recurrence_enabled ? invoiceForm.send_now : false,
         line_items: lineItems.map((item) => ({
           description: item.description,
           quantity: Number(item.quantity || 0),
@@ -791,6 +825,197 @@ export default function App() {
     setEmailDialogOpen(true);
   };
 
+  const handleBulkDeleteInvoices = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteInvoice(row.id)));
+        await loadAll();
+        toast.success("Invoices deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete invoices.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkSendInvoiceReminders = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        const results = await Promise.allSettled(
+          rows.map((row) =>
+            api.draftEmail({
+              entity_type: "invoice",
+              entity_id: row.id,
+              to_email: getEntityEmail("invoice", row.id),
+              send: true,
+            })
+          )
+        );
+        const successes = results.filter((result) => result.status === "fulfilled").length;
+        const failures = results.length - successes;
+        if (successes) {
+          await loadAll();
+        }
+        if (failures) {
+          toast.error(`Sent ${successes}. ${failures} failed.`);
+        } else {
+          toast.success(`Sent ${successes} reminder${successes === 1 ? "" : "s"}.`);
+        }
+      } catch (error) {
+        toast.error(error.message || "Unable to send reminders.");
+      }
+    },
+    [getEntityEmail, loadAll]
+  );
+
+  const handleBulkDeleteQuotes = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteQuote(row.id)));
+        await loadAll();
+        toast.success("Quotes deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete quotes.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkSendQuoteReminders = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        const results = await Promise.allSettled(
+          rows.map((row) =>
+            api.draftEmail({
+              entity_type: "quote",
+              entity_id: row.id,
+              to_email: getEntityEmail("quote", row.id),
+              send: true,
+            })
+          )
+        );
+        const successes = results.filter((result) => result.status === "fulfilled").length;
+        const failures = results.length - successes;
+        if (successes) {
+          await loadAll();
+        }
+        if (failures) {
+          toast.error(`Sent ${successes}. ${failures} failed.`);
+        } else {
+          toast.success(`Sent ${successes} reminder${successes === 1 ? "" : "s"}.`);
+        }
+      } catch (error) {
+        toast.error(error.message || "Unable to send reminders.");
+      }
+    },
+    [getEntityEmail, loadAll]
+  );
+
+  const handleBulkDeleteProposals = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteProposal(row.id)));
+        await loadAll();
+        toast.success("Proposals deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete proposals.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkSendProposalReminders = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        const results = await Promise.allSettled(
+          rows.map((row) =>
+            api.draftEmail({
+              entity_type: "proposal",
+              entity_id: row.id,
+              to_email: getEntityEmail("proposal", row.id),
+              send: true,
+            })
+          )
+        );
+        const successes = results.filter((result) => result.status === "fulfilled").length;
+        const failures = results.length - successes;
+        if (successes) {
+          await loadAll();
+        }
+        if (failures) {
+          toast.error(`Sent ${successes}. ${failures} failed.`);
+        } else {
+          toast.success(`Sent ${successes} reminder${successes === 1 ? "" : "s"}.`);
+        }
+      } catch (error) {
+        toast.error(error.message || "Unable to send reminders.");
+      }
+    },
+    [getEntityEmail, loadAll]
+  );
+
+  const handleBulkDeleteClients = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteClient(row.id)));
+        await loadAll();
+        toast.success("Clients deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete clients.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkDeleteAgreements = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteAgreement(row.id)));
+        await loadAll();
+        toast.success("Agreements deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete agreements.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkDeleteExpenses = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteExpense(row.id)));
+        await loadAll();
+        toast.success("Expenses deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete expenses.");
+      }
+    },
+    [loadAll]
+  );
+
+  const handleBulkDeleteUsers = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      try {
+        await Promise.all(rows.map((row) => api.deleteUser(row.id)));
+        await loadAll();
+        toast.success("Users deleted.");
+      } catch (error) {
+        toast.error(error.message || "Unable to delete users.");
+      }
+    },
+    [loadAll]
+  );
+
   const navItems = [
     { id: "dashboard", label: "Dashboard" },
     { id: "clients", label: "Clients" },
@@ -887,15 +1112,22 @@ export default function App() {
         formatDate,
         formatGBP,
         onEdit: (invoice) => {
-                setInvoiceForm({
-                  client_id: String(invoice.client_id),
-                  quote_id: invoice.quote_id ? String(invoice.quote_id) : "",
-                  display_id: invoice.display_id || "",
-                  is_legacy: Boolean(invoice.is_legacy),
-                  title: invoice.title,
-                  status: invoice.status,
-                  due_date: invoice.due_date ? parseISO(invoice.due_date) : null,
-                  notes: invoice.notes || "",
+          setInvoiceForm({
+            client_id: String(invoice.client_id),
+            quote_id: invoice.quote_id ? String(invoice.quote_id) : "",
+            display_id: invoice.display_id || "",
+            is_legacy: Boolean(invoice.is_legacy),
+            title: invoice.title,
+            status: invoice.status,
+            issued_at: invoice.issued_at ? parseISO(invoice.issued_at) : null,
+            due_date: invoice.due_date ? parseISO(invoice.due_date) : null,
+            notes: invoice.notes || "",
+            recurrence_enabled: false,
+            recurrence_frequency: "monthly",
+            recurrence_count: 1,
+            recurrence_day_of_month: "",
+            due_rule_unit: "days",
+            due_rule_value: 30,
             line_items:
               invoice.line_items && invoice.line_items.length
                 ? invoice.line_items.map((item) => ({
@@ -1157,6 +1389,7 @@ export default function App() {
             editingClientId={editingClientId}
             resetClientForm={resetClientForm}
             handleClientSubmit={handleClientSubmit}
+            onBulkDelete={handleBulkDeleteClients}
           />
         )}
         {view === "invoices" && (
@@ -1173,6 +1406,8 @@ export default function App() {
             resetInvoiceForm={resetInvoiceForm}
             handleInvoiceSubmit={handleInvoiceSubmit}
             handleMarkInvoicePaid={handleMarkInvoicePaid}
+            onBulkDelete={handleBulkDeleteInvoices}
+            onBulkSendReminder={handleBulkSendInvoiceReminders}
             emptyInvoice={emptyInvoice}
           />
         )}
@@ -1188,6 +1423,8 @@ export default function App() {
             editingQuoteId={editingQuoteId}
             resetQuoteForm={resetQuoteForm}
             handleQuoteSubmit={handleQuoteSubmit}
+            onBulkDelete={handleBulkDeleteQuotes}
+            onBulkSendReminder={handleBulkSendQuoteReminders}
             emptyQuote={emptyQuote}
           />
         )}
@@ -1204,6 +1441,7 @@ export default function App() {
             editingAgreementId={editingAgreementId}
             resetAgreementForm={resetAgreementForm}
             handleAgreementSubmit={handleAgreementSubmit}
+            onBulkDelete={handleBulkDeleteAgreements}
           />
         )}
         {view === "proposals" && (
@@ -1220,6 +1458,8 @@ export default function App() {
             resetProposalForm={resetProposalForm}
             handleProposalSubmit={handleProposalSubmit}
             handleProposalUpload={handleProposalUpload}
+            onBulkDelete={handleBulkDeleteProposals}
+            onBulkSendReminder={handleBulkSendProposalReminders}
           />
         )}
         {view === "expenses" && (
@@ -1236,6 +1476,7 @@ export default function App() {
             resetExpenseForm={resetExpenseForm}
             handleExpenseSubmit={handleExpenseSubmit}
             handleExpenseUpload={handleExpenseUpload}
+            onBulkDelete={handleBulkDeleteExpenses}
           />
         )}
         {view === "emails" && (
@@ -1258,6 +1499,7 @@ export default function App() {
             updateSettings={updateSettings}
             onSaveSettings={saveSettings}
             onSaveSmtp={saveSettings}
+            onTestSmtp={handleTestSmtp}
             onBackup={handleBackup}
             onResetData={handleResetData}
             onListBackups={handleListBackups}
@@ -1277,6 +1519,7 @@ export default function App() {
             editingUserId={editingUserId}
             resetUserForm={resetUserForm}
             handleUserSubmit={handleUserSubmit}
+            onBulkDelete={handleBulkDeleteUsers}
           />
         )}
           </main>

@@ -16,6 +16,7 @@ export default function ClientsPage({
   editingClientId,
   resetClientForm,
   handleClientSubmit,
+  onBulkDelete,
 }) {
   const exportColumns = [
     { key: "name", header: "Name" },
@@ -78,6 +79,20 @@ export default function ClientsPage({
             searchKey="name"
             searchPlaceholder="Search clients..."
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected clients?",
+                  description:
+                    "This action cannot be undone. Related records will also be removed.",
+                  confirmLabel: "Delete clients",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>
