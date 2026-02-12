@@ -1,5 +1,6 @@
 from email.message import EmailMessage
 import smtplib
+import logging
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -410,3 +411,58 @@ def send_email_smtp(to_email, subject, body, attachments=None):
         return True, "Email sent via SMTP."
     except Exception as exc:
         return False, f"SMTP send failed: {exc}"
+
+
+def test_smtp_connection():
+    logger = logging.getLogger("smtp_test")
+    from .db import SessionLocal
+    db = SessionLocal()
+    try:
+        app_settings = get_or_create_settings(db)
+    finally:
+        db.close()
+
+    smtp_host = app_settings.smtp_host or env_settings.smtp_host
+    smtp_port = app_settings.smtp_port or env_settings.smtp_port
+    smtp_username = app_settings.smtp_username or env_settings.smtp_username
+    smtp_password = (
+        decrypt_secret(app_settings.smtp_password)
+        or app_settings.smtp_password
+        or env_settings.smtp_password
+    )
+    smtp_use_tls = (
+        app_settings.smtp_use_tls
+        if app_settings.smtp_use_tls is not None
+        else env_settings.smtp_use_tls
+    )
+
+    if not smtp_host:
+        logger.warning("SMTP test failed: host missing.")
+        return False, "SMTP host not configured."
+
+    try:
+        logger.warning(
+            "SMTP test config: host=%s port=%s tls=%s username=%s from=%s password_set=%s",
+            smtp_host,
+            smtp_port,
+            smtp_use_tls,
+            smtp_username or "",
+            app_settings.smtp_from or env_settings.smtp_from,
+            bool(smtp_password),
+        )
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as server:
+                if smtp_username and smtp_password:
+                    server.login(smtp_username, smtp_password)
+                server.noop()
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                if smtp_use_tls:
+                    server.starttls()
+                if smtp_username and smtp_password:
+                    server.login(smtp_username, smtp_password)
+                server.noop()
+        return True, "SMTP connection successful."
+    except Exception as exc:
+        logger.exception("SMTP test failed.")
+        return False, f"SMTP connection failed: {exc}"

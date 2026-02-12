@@ -13,7 +13,7 @@ from . import crud, models, schemas
 from .auth import clear_session, create_session, get_current_user, require_role, require_user
 from .config import settings
 from .db import Base, engine, get_db, SessionLocal
-from .email_utils import generate_email_draft, send_email_smtp
+from .email_utils import generate_email_draft, send_email_smtp, test_smtp_connection
 from base64 import b64encode
 from .security import password_meets_policy, verify_password
 
@@ -178,6 +178,14 @@ def update_settings(
     return settings_row
 
 
+@app.post("/settings/smtp/test")
+def test_smtp(user=Depends(require_role(["owner", "admin"]))):
+    ok, message = test_smtp_connection()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"status": "ok", "message": message}
+
+
 @app.post("/admin/backup")
 def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["owner", "admin"]))):
     import tarfile
@@ -333,7 +341,6 @@ def auth_setup(payload: schemas.AuthSetupRequest, response: Response, db: Sessio
     return schemas.AuthStatus(needs_setup=False, user=user)
 
 
-@app.post("/auth/login", response_model=schemas.AuthStatus)
 def _get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
@@ -457,10 +464,35 @@ def list_invoices(db: Session = Depends(get_db)):
 
 @app.post("/clients/{client_id}/invoices", response_model=schemas.InvoiceOut)
 def create_invoice(client_id: int, payload: schemas.InvoiceCreate, db: Session = Depends(get_db)):
-    if not crud.get_client(db, client_id):
+    client = crud.get_client(db, client_id)
+    if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     try:
-        return crud.create_invoice(db, client_id, payload)
+        created, first_invoice = crud.create_invoice(db, client_id, payload)
+        if payload.send_now and first_invoice:
+            to_email = client.invoice_email or client.contact_email or client.email
+            if to_email:
+                subject, body, pdf_bytes, pdf_filename = generate_email_draft(
+                    "invoice", client, first_invoice
+                )
+                attachments = []
+                if pdf_bytes:
+                    attachments.append(
+                        {
+                            "content": pdf_bytes,
+                            "filename": pdf_filename or "invoice.pdf",
+                            "maintype": "application",
+                            "subtype": "pdf",
+                        }
+                    )
+                sent, _message = send_email_smtp(to_email, subject, body, attachments=attachments)
+                if not sent:
+                    first_invoice.status = "draft"
+                    db.commit()
+            else:
+                first_invoice.status = "draft"
+                db.commit()
+        return created
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -789,6 +821,16 @@ def create_email_draft(payload: schemas.EmailDraftRequest, db: Session = Depends
                 }
             )
         sent, message = send_email_smtp(payload.to_email, subject, body, attachments=attachments)
+        if sent:
+            if entity_type == "invoice" and entity.status != "paid":
+                entity.status = "sent"
+                db.commit()
+            elif entity_type == "quote" and entity.status == "draft":
+                entity.status = "sent"
+                db.commit()
+            elif entity_type == "proposal" and entity.status == "draft":
+                entity.status = "sent"
+                db.commit()
     else:
         sent, message = False, "Draft generated."
 

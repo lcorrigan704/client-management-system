@@ -11,6 +11,17 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -32,25 +43,71 @@ export function DataTable({
   totalLabel = "Total",
   formatTotal,
   exportConfig,
+  enableRowSelection = false,
+  onSelectionChange,
+  bulkActions = [],
 }) {
   const [sorting, setSorting] = React.useState([]);
   const [columnFilters, setColumnFilters] = React.useState([]);
+  const [rowSelection, setRowSelection] = React.useState({});
   const [isExporting, setIsExporting] = React.useState(false);
+  const [confirmAction, setConfirmAction] = React.useState(null);
+  const selectionColumn = React.useMemo(() => {
+    if (!enableRowSelection) return null;
+    return {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllRowsSelected() ||
+            (table.getIsSomeRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+      meta: { headerClassName: "w-[48px]" },
+    };
+  }, [enableRowSelection]);
+  const tableColumns = React.useMemo(
+    () => (selectionColumn ? [selectionColumn, ...columns] : columns),
+    [columns, selectionColumn]
+  );
 
   const table = useReactTable({
     data,
-    columns,
+    columns: tableColumns,
     getCoreRowModel: getCoreRowModel(),
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onRowSelectionChange: setRowSelection,
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     state: {
       sorting,
       columnFilters,
+      rowSelection,
     },
+    enableRowSelection: enableRowSelection,
   });
+  const selectedRows = React.useMemo(
+    () => table.getSelectedRowModel().rows.map((row) => row.original),
+    [rowSelection, table]
+  );
+  React.useEffect(() => {
+    if (!onSelectionChange) return;
+    onSelectionChange(selectedRows);
+  }, [onSelectionChange, selectedRows]);
   const totalValue = React.useMemo(() => {
     if (!totalKey) return null;
     return table
@@ -134,6 +191,27 @@ export function DataTable({
     }
   }, [buildCsv, exportConfig, isExporting, table]);
 
+  const handleBulkActionClick = React.useCallback(
+    (action) => {
+      if (action.confirm) {
+        setConfirmAction({ action, rows: selectedRows });
+      } else {
+        action.onClick(selectedRows);
+      }
+    },
+    [selectedRows]
+  );
+
+  const handleConfirmAction = React.useCallback(async () => {
+    if (!confirmAction) return;
+    try {
+      await Promise.resolve(confirmAction.action.onClick(confirmAction.rows));
+    } finally {
+      setConfirmAction(null);
+      table.resetRowSelection();
+    }
+  }, [confirmAction, table]);
+
   return (
     <div className="space-y-3">
       {searchKey ? (
@@ -151,6 +229,57 @@ export function DataTable({
           ) : null}
         </div>
       ) : null}
+      {enableRowSelection && selectedRows.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">{selectedRows.length} selected</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {bulkActions.map((action) => (
+              <Button
+                key={action.label}
+                type="button"
+                size="sm"
+                variant={action.variant || "outline"}
+                onClick={() => handleBulkActionClick(action)}
+                disabled={action.disabled}
+              >
+                {action.label}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => table.resetRowSelection()}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {confirmAction ? (
+        <AlertDialog open onOpenChange={() => setConfirmAction(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {confirmAction.action.confirm?.title || "Confirm action"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmAction.action.confirm?.description ||
+                  "Are you sure you want to proceed?"}
+                <span className="mt-2 block text-xs text-muted-foreground">
+                  {confirmAction.rows.length} selected
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmAction}>
+                {confirmAction.action.confirm?.confirmLabel || "Confirm"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
       <div className="rounded-md border bg-background">
         <Table>
           <TableHeader>
@@ -159,12 +288,15 @@ export function DataTable({
                 {headerGroup.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const sortState = header.column.getIsSorted();
+                  const isSelectionHeader = header.column.id === "select";
                   return (
                     <TableHead
                       key={header.id}
                       className={header.column.columnDef.meta?.headerClassName}
                     >
-                      {header.isPlaceholder ? null : (
+                      {header.isPlaceholder ? null : isSelectionHeader ? (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      ) : (
                         <Button
                           type="button"
                           variant="ghost"
@@ -202,7 +334,7 @@ export function DataTable({
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-sm">
+                <TableCell colSpan={tableColumns.length} className="h-24 text-center text-sm">
                   {emptyMessage}
                 </TableCell>
               </TableRow>
@@ -211,10 +343,12 @@ export function DataTable({
           {totalKey ? (
             <TableFooter>
               <TableRow>
-                {columns.map((column) => {
+                {tableColumns.map((column, index) => {
                   const columnKey = column.id || column.accessorKey;
                   const isTotalColumn = columnKey === totalKey;
-                  const isFirstColumn = column === columns[0];
+                  const isFirstColumn = enableRowSelection
+                    ? index === 1
+                    : index === 0;
                   return (
                     <TableCell
                       key={columnKey || String(isFirstColumn)}

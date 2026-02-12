@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +7,7 @@ import { DataTable } from "@/components/data-table";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
 import { formatGBP, formatDate } from "@/utils/format";
 
@@ -22,8 +24,11 @@ export default function InvoicesPage({
   resetInvoiceForm,
   handleInvoiceSubmit,
   handleMarkInvoicePaid,
+  onBulkDelete,
+  onBulkSendReminder,
   emptyInvoice,
 }) {
+  const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const quoteMap = new Map(quotes.map((quote) => [quote.id, quote]));
   const clientQuotes = quotes.filter(
@@ -133,6 +138,31 @@ export default function InvoicesPage({
             totalLabel="Total invoiced"
             formatTotal={formatGBP}
             exportConfig={exportConfig}
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Send reminders",
+                variant: "outline",
+                onClick: (rows) => onBulkSendReminder?.(rows),
+                confirm: {
+                  title: "Send invoice reminders?",
+                  description:
+                    "This will send reminder emails for the selected invoices using SMTP.",
+                  confirmLabel: "Send reminders",
+                },
+              },
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected invoices?",
+                  description:
+                    "This action cannot be undone. The selected invoices will be permanently removed.",
+                  confirmLabel: "Delete invoices",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>
@@ -144,87 +174,63 @@ export default function InvoicesPage({
             <DialogDescription>Attach invoices to clients.</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleInvoiceSubmit}>
-            <div className={fieldClass}>
-              <label className={labelClass}>Client</label>
-              <Select
-                value={invoiceForm.client_id}
-                onValueChange={(value) => setInvoiceForm({ ...invoiceForm, client_id: value })}
-                disabled={editingInvoiceId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select client" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((client) => (
-                    <SelectItem key={client.id} value={String(client.id)}>
-                      {client.company || client.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className={fieldClass}>
-              <label className={labelClass}>Quote (optional)</label>
-              <Select
-                value={invoiceForm.quote_id}
-                onValueChange={(value) => {
-                  const quoteId = value === "none" ? "" : value;
-                  const selectedQuote = clientQuotes.find(
-                    (quote) => String(quote.id) === String(quoteId)
-                  );
-                  const nextLineItems =
-                    selectedQuote?.line_items && selectedQuote.line_items.length
-                      ? selectedQuote.line_items.map((item) => ({
-                          description: item.description,
-                          quantity: item.quantity,
-                          unit_amount: item.unit_amount,
-                        }))
-                      : emptyInvoice.line_items;
-                  setInvoiceForm({
-                    ...invoiceForm,
-                    quote_id: quoteId,
-                    line_items: selectedQuote ? nextLineItems : invoiceForm.line_items,
-                  });
-                }}
-                disabled={!invoiceForm.client_id}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select quote" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No quote</SelectItem>
-                  {clientQuotes.map((quote) => (
-                    <SelectItem key={quote.id} value={String(quote.id)}>
-                      {quote.display_id || quote.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className={gridTwo}>
               <div className={fieldClass}>
-                <label className={labelClass}>Use custom ID</label>
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={invoiceForm.is_legacy}
-                    onChange={(event) =>
-                      setInvoiceForm({ ...invoiceForm, is_legacy: event.target.checked })
-                    }
-                  />
-                  Override auto-generated ID
-                </label>
+                <label className={labelClass}>Client</label>
+                <Select
+                  value={invoiceForm.client_id}
+                  onValueChange={(value) => setInvoiceForm({ ...invoiceForm, client_id: value })}
+                  disabled={editingInvoiceId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clients.map((client) => (
+                      <SelectItem key={client.id} value={String(client.id)}>
+                        {client.company || client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className={fieldClass}>
-                <label className={labelClass}>Custom ID</label>
-                <Input
-                  value={invoiceForm.display_id}
-                  onChange={(event) =>
-                    setInvoiceForm({ ...invoiceForm, display_id: event.target.value })
-                  }
-                  placeholder="INV-1001"
-                  disabled={!invoiceForm.is_legacy}
-                />
+                <label className={labelClass}>Quote (optional)</label>
+                <Select
+                  value={invoiceForm.quote_id}
+                  onValueChange={(value) => {
+                    const quoteId = value === "none" ? "" : value;
+                    const selectedQuote = clientQuotes.find(
+                      (quote) => String(quote.id) === String(quoteId)
+                    );
+                    const nextLineItems =
+                      selectedQuote?.line_items && selectedQuote.line_items.length
+                        ? selectedQuote.line_items.map((item) => ({
+                            description: item.description,
+                            quantity: item.quantity,
+                            unit_amount: item.unit_amount,
+                          }))
+                        : emptyInvoice.line_items;
+                    setInvoiceForm({
+                      ...invoiceForm,
+                      quote_id: quoteId,
+                      line_items: selectedQuote ? nextLineItems : invoiceForm.line_items,
+                    });
+                  }}
+                  disabled={!invoiceForm.client_id}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select quote" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No quote</SelectItem>
+                    {clientQuotes.map((quote) => (
+                      <SelectItem key={quote.id} value={String(quote.id)}>
+                        {quote.display_id || quote.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className={gridTwo}>
@@ -254,11 +260,198 @@ export default function InvoicesPage({
                 </Select>
               </div>
               <div className={fieldClass}>
+                <label className={labelClass}>Invoice date</label>
+                <DatePicker
+                  value={invoiceForm.issued_at}
+                  onChange={(date) => setInvoiceForm({ ...invoiceForm, issued_at: date })}
+                  placeholder="Pick invoice date"
+                />
+              </div>
+              <div className={fieldClass}>
                 <label className={labelClass}>Due date</label>
                 <DatePicker
                   value={invoiceForm.due_date}
                   onChange={(date) => setInvoiceForm({ ...invoiceForm, due_date: date })}
                   placeholder="Pick a due date"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className={labelClass}>Recurring schedule</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={invoiceForm.recurrence_enabled}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      setInvoiceForm({ ...invoiceForm, recurrence_enabled: enabled });
+                      if (enabled) {
+                        setRecurringDialogOpen(true);
+                      }
+                    }}
+                  />
+                  Generate recurring invoices
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRecurringDialogOpen(true)}
+                  disabled={!invoiceForm.recurrence_enabled}
+                >
+                  Configure schedule
+                </Button>
+                {invoiceForm.recurrence_enabled && (
+                  <span className="text-xs text-muted-foreground">
+                    {invoiceForm.recurrence_frequency} · {invoiceForm.recurrence_count} invoices ·
+                    due {invoiceForm.due_rule_value} {invoiceForm.due_rule_unit}
+                  </span>
+                )}
+              </div>
+              <Dialog open={recurringDialogOpen} onOpenChange={setRecurringDialogOpen}>
+                <DialogContent className="sm:max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Recurring invoice schedule</DialogTitle>
+                    <DialogDescription>
+                      Set how often invoices should be generated and when they are due.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm md:col-span-2">
+                      <div>
+                        <p className="font-medium text-foreground">Send first invoice now</p>
+                        <p className="text-xs text-muted-foreground">
+                          If enabled, the first invoice is marked as sent.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={invoiceForm.send_now}
+                        onCheckedChange={(checked) =>
+                          setInvoiceForm({ ...invoiceForm, send_now: checked })
+                        }
+                      />
+                    </div>
+                    <div className={fieldClass}>
+                      <label className={labelClass}>Frequency</label>
+                      <Select
+                        value={invoiceForm.recurrence_frequency}
+                        onValueChange={(value) =>
+                          setInvoiceForm({ ...invoiceForm, recurrence_frequency: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="weekly">Weekly</SelectItem>
+                          <SelectItem value="monthly">Monthly</SelectItem>
+                          <SelectItem value="quarterly">Quarterly</SelectItem>
+                          <SelectItem value="annually">Annually</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className={fieldClass}>
+                      <label className={labelClass}>Occurrences</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={invoiceForm.recurrence_count}
+                        onChange={(event) =>
+                          setInvoiceForm({
+                            ...invoiceForm,
+                            recurrence_count: Number(event.target.value || 1),
+                          })
+                        }
+                      />
+                    </div>
+                    <div className={fieldClass}>
+                      <label className={labelClass}>Day of month</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={invoiceForm.recurrence_day_of_month}
+                        onChange={(event) =>
+                          setInvoiceForm({
+                            ...invoiceForm,
+                            recurrence_day_of_month: event.target.value,
+                          })
+                        }
+                        disabled={invoiceForm.recurrence_frequency === "weekly"}
+                        placeholder="Use invoice date day"
+                      />
+                    </div>
+                    <div className={fieldClass}>
+                      <label className={labelClass}>Due date unit</label>
+                      <Select
+                        value={invoiceForm.due_rule_unit}
+                        onValueChange={(value) =>
+                          setInvoiceForm({ ...invoiceForm, due_rule_unit: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="days">Days</SelectItem>
+                          <SelectItem value="weeks">Weeks</SelectItem>
+                          <SelectItem value="months">Months</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className={fieldClass}>
+                      <label className={labelClass}>Due date value</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={invoiceForm.due_rule_value}
+                        onChange={(event) =>
+                          setInvoiceForm({
+                            ...invoiceForm,
+                            due_rule_value: Number(event.target.value || 1),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter className="mt-2">
+                    <DialogClose asChild>
+                      <Button type="button">Done</Button>
+                    </DialogClose>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+            <div className={gridTwo}>
+              <div className={fieldClass}>
+                <label className={labelClass}>Use custom ID</label>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={invoiceForm.is_legacy}
+                    onChange={(event) =>
+                      setInvoiceForm({ ...invoiceForm, is_legacy: event.target.checked })
+                    }
+                    disabled={invoiceForm.recurrence_enabled}
+                  />
+                  Override auto-generated ID
+                </label>
+                {invoiceForm.recurrence_enabled && (
+                  <p className="text-xs text-muted-foreground">
+                    Custom IDs are disabled for recurring invoices.
+                  </p>
+                )}
+              </div>
+              <div className={fieldClass}>
+                <label className={labelClass}>Custom ID</label>
+                <Input
+                  value={invoiceForm.display_id}
+                  onChange={(event) =>
+                    setInvoiceForm({ ...invoiceForm, display_id: event.target.value })
+                  }
+                  placeholder="INV-1001"
+                  disabled={!invoiceForm.is_legacy || invoiceForm.recurrence_enabled}
                 />
               </div>
             </div>

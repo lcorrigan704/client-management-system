@@ -26,6 +26,7 @@ export default function UsersPage({
   editingUserId,
   resetUserForm,
   handleUserSubmit,
+  onBulkDelete,
 }) {
   const [showBankDetails, setShowBankDetails] = useState(false);
 
@@ -63,6 +64,20 @@ export default function UsersPage({
             emptyMessage="No users yet."
             searchKey="email"
             searchPlaceholder="Search users..."
+            enableRowSelection
+            bulkActions={[
+              {
+                label: "Delete selected",
+                variant: "destructive",
+                onClick: (rows) => onBulkDelete?.(rows),
+                confirm: {
+                  title: "Delete selected users?",
+                  description:
+                    "This action cannot be undone. The selected users will be permanently removed.",
+                  confirmLabel: "Delete users",
+                },
+              },
+            ]}
           />
         </CardContent>
       </Card>

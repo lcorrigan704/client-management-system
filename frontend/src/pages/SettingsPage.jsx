@@ -33,6 +33,7 @@ export default function SettingsPage({
   updateSettings,
   onSaveSettings,
   onSaveSmtp,
+  onTestSmtp,
   onBackup,
   onResetData,
   onListBackups,
@@ -372,7 +373,10 @@ export default function SettingsPage({
             </Select>
           </div>
         </CardContent>
-        <CardFooter className="justify-end">
+        <CardFooter className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={onTestSmtp}>
+            Test SMTP connection
+          </Button>
           <Button onClick={onSaveSmtp}>Save SMTP settings</Button>
         </CardFooter>
       </Card>

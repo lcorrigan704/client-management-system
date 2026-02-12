@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { emptyEmailDraft } from "@/constants/defaults";
 
-const useEmailDraft = ({ onError, onCopySuccess, onCopyError, isActive } = {}) => {
+const useEmailDraft = ({ onError, onCopySuccess, onCopyError, onSendSuccess, isActive } = {}) => {
   const [emailForm, setEmailForm] = useState(emptyEmailDraft);
   const [emailResponse, setEmailResponse] = useState(null);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -29,6 +29,9 @@ const useEmailDraft = ({ onError, onCopySuccess, onCopyError, isActive } = {}) =
         };
         const response = await api.draftEmail(payload);
         setEmailResponse(response);
+        if (response?.sent && onSendSuccess) {
+          onSendSuccess(response.message || "Email sent.");
+        }
         setEmailDialogOpen(false);
       } catch (error) {
         if (onError) onError(error);
