@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 
@@ -212,7 +212,49 @@ class AgreementOut(AgreementBase):
     id: int
     client_id: int
     created_at: datetime
+    current_version: Optional[int] = None
+    updated_at: Optional[datetime] = None
+    updated_by_email: Optional[str] = None
     sla_items: list[AgreementSLAOut] = []
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgreementVersionOut(BaseModel):
+    id: int
+    agreement_id: int
+    version_number: int
+    title: Optional[str] = None
+    created_at: datetime
+    created_by_email: Optional[str] = None
+    is_current: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgreementCommentCreate(BaseModel):
+    field_key: str
+    comment: str
+    mentions: list[str] | None = None
+
+
+class CommentStatusUpdate(BaseModel):
+    implemented: bool
+
+
+class AgreementCommentOut(BaseModel):
+    id: int
+    agreement_version_id: Optional[int] = None
+    field_key: str
+    comment: str
+    mentions: list[str] | None = None
+    implemented: bool = False
+    version_number: Optional[int] = None
+    is_current: bool = False
+    created_at: datetime
+    created_by_email: Optional[str] = None
+    like_count: int
+    dislike_count: int
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -277,8 +319,59 @@ class ProposalOut(ProposalBase):
     id: int
     client_id: int
     created_at: datetime
+    current_version: Optional[int] = None
+    updated_at: Optional[datetime] = None
+    updated_by_email: Optional[str] = None
     requirements: list[ProposalRequirementOut] = []
     attachments: list[ProposalAttachmentOut] = []
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProposalVersionOut(BaseModel):
+    id: int
+    proposal_id: int
+    version_number: int
+    title: Optional[str] = None
+    status: Optional[str] = None
+    created_at: datetime
+    created_by_email: Optional[str] = None
+    is_current: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProposalCommentCreate(BaseModel):
+    field_key: str
+    comment: str
+    mentions: list[str] | None = None
+
+
+class ProposalCommentOut(BaseModel):
+    id: int
+    proposal_version_id: Optional[int] = None
+    field_key: str
+    comment: str
+    mentions: list[str] | None = None
+    implemented: bool = False
+    version_number: Optional[int] = None
+    is_current: bool = False
+    created_at: datetime
+    created_by_email: Optional[str] = None
+    like_count: int
+    dislike_count: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CommentReactionRequest(BaseModel):
+    reaction: Literal["like", "dislike"]
+
+
+class UserSearchOut(BaseModel):
+    id: int
+    name: Optional[str] = None
+    email: str
+
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -18,6 +18,18 @@ const formatDate = (value) => {
   return `${day}/${month}/${year}`;
 };
 
+const formatDateTime = (value) => {
+  if (!value) return "—";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+};
+
 const toTimestamp = (value) => {
   if (!value) return 0;
   const date = value instanceof Date ? value : new Date(value);
@@ -32,4 +44,4 @@ const gbpFormatter = new Intl.NumberFormat("en-GB", {
 
 const formatGBP = (value) => gbpFormatter.format(Number(value || 0));
 
-export { toDateTime, formatDate, formatGBP, toTimestamp };
+export { toDateTime, formatDate, formatDateTime, formatGBP, toTimestamp };

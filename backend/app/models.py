@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -152,12 +152,25 @@ class ServiceAgreement(Base):
     company_signed_date: Mapped[datetime | None] = mapped_column(DateTime)
     client_signatory_name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     client: Mapped["Client"] = relationship("Client", back_populates="agreements")
     quote: Mapped["Quote"] = relationship("Quote", back_populates="agreements")
     sla_items: Mapped[list["ServiceAgreementSLA"]] = relationship(
         "ServiceAgreementSLA", back_populates="agreement", cascade="all, delete-orphan"
     )
+    versions: Mapped[list["ServiceAgreementVersion"]] = relationship(
+        "ServiceAgreementVersion", back_populates="agreement", cascade="all, delete-orphan"
+    )
+    updated_by: Mapped["User"] = relationship("User", foreign_keys=[updated_by_user_id])
+
+    @property
+    def updated_by_email(self) -> str | None:
+        return self.updated_by.email if self.updated_by else None
 
 
 class ServiceAgreementSLA(Base):
@@ -193,6 +206,11 @@ class Proposal(Base):
     timeline: Mapped[str | None] = mapped_column(Text())
     content: Mapped[str | None] = mapped_column(Text())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     client: Mapped["Client"] = relationship("Client", back_populates="proposals")
     quote: Mapped["Quote"] = relationship("Quote")
@@ -202,6 +220,14 @@ class Proposal(Base):
     attachments: Mapped[list["ProposalAttachment"]] = relationship(
         "ProposalAttachment", back_populates="proposal", cascade="all, delete-orphan"
     )
+    versions: Mapped[list["ProposalVersion"]] = relationship(
+        "ProposalVersion", back_populates="proposal", cascade="all, delete-orphan"
+    )
+    updated_by: Mapped["User"] = relationship("User", foreign_keys=[updated_by_user_id])
+
+    @property
+    def updated_by_email(self) -> str | None:
+        return self.updated_by.email if self.updated_by else None
 
 
 class ProposalRequirement(Base):
@@ -227,6 +253,150 @@ class ProposalAttachment(Base):
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
     proposal: Mapped["Proposal"] = relationship("Proposal", back_populates="attachments")
+
+
+class ServiceAgreementVersion(Base):
+    __tablename__ = "agreement_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    agreement_id: Mapped[int] = mapped_column(
+        ForeignKey("service_agreements.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200))
+    data_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    sla_items_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    agreement: Mapped["ServiceAgreement"] = relationship("ServiceAgreement", back_populates="versions")
+    created_by: Mapped["User"] = relationship("User")
+
+    @property
+    def created_by_email(self) -> str | None:
+        return self.created_by.email if self.created_by else None
+
+
+class ProposalVersion(Base):
+    __tablename__ = "proposal_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    proposal_id: Mapped[int] = mapped_column(
+        ForeignKey("proposals.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str | None] = mapped_column(String(50))
+    data_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    requirements_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    attachments_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    proposal: Mapped["Proposal"] = relationship("Proposal", back_populates="versions")
+    created_by: Mapped["User"] = relationship("User")
+
+    @property
+    def created_by_email(self) -> str | None:
+        return self.created_by.email if self.created_by else None
+
+
+class AgreementVersionComment(Base):
+    __tablename__ = "agreement_version_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    agreement_version_id: Mapped[int] = mapped_column(
+        ForeignKey("agreement_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    field_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    comment: Mapped[str] = mapped_column(Text(), nullable=False)
+    mentions: Mapped[list[str] | None] = mapped_column(JSON, default=list)
+    implemented: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    like_count: Mapped[int] = mapped_column(Integer, default=0)
+    dislike_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    version: Mapped["ServiceAgreementVersion"] = relationship("ServiceAgreementVersion")
+    created_by: Mapped["User"] = relationship("User")
+
+    @property
+    def created_by_email(self) -> str | None:
+        return self.created_by.email if self.created_by else None
+
+    @property
+    def version_number(self) -> int | None:
+        return self.version.version_number if self.version else None
+
+    @property
+    def is_current(self) -> bool:
+        return bool(self.version.is_current) if self.version else False
+
+
+class AgreementVersionCommentReaction(Base):
+    __tablename__ = "agreement_version_comment_reactions"
+    __table_args__ = (UniqueConstraint("comment_id", "user_id", name="uq_agreement_comment_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    comment_id: Mapped[int] = mapped_column(
+        ForeignKey("agreement_version_comments.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    reaction: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProposalVersionComment(Base):
+    __tablename__ = "proposal_version_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    proposal_version_id: Mapped[int] = mapped_column(
+        ForeignKey("proposal_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    field_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    comment: Mapped[str] = mapped_column(Text(), nullable=False)
+    mentions: Mapped[list[str] | None] = mapped_column(JSON, default=list)
+    implemented: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    like_count: Mapped[int] = mapped_column(Integer, default=0)
+    dislike_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    version: Mapped["ProposalVersion"] = relationship("ProposalVersion")
+    created_by: Mapped["User"] = relationship("User")
+
+    @property
+    def created_by_email(self) -> str | None:
+        return self.created_by.email if self.created_by else None
+
+    @property
+    def version_number(self) -> int | None:
+        return self.version.version_number if self.version else None
+
+    @property
+    def is_current(self) -> bool:
+        return bool(self.version.is_current) if self.version else False
+
+
+class ProposalVersionCommentReaction(Base):
+    __tablename__ = "proposal_version_comment_reactions"
+    __table_args__ = (UniqueConstraint("comment_id", "user_id", name="uq_proposal_comment_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    comment_id: Mapped[int] = mapped_column(
+        ForeignKey("proposal_version_comments.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    reaction: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Expense(Base):

@@ -1197,6 +1197,9 @@ export default function App() {
             title: agreement.title,
             start_date: agreement.start_date ? parseISO(agreement.start_date) : null,
             end_date: agreement.end_date ? parseISO(agreement.end_date) : null,
+            current_version: agreement.current_version || 1,
+            updated_at: agreement.updated_at || null,
+            updated_by_email: agreement.updated_by_email || "",
             scope_of_services: agreement.scope_of_services || "",
             duration: agreement.duration || "",
             availability: agreement.availability || "",
@@ -1242,6 +1245,9 @@ export default function App() {
             quote_id: proposal.quote_id ? String(proposal.quote_id) : "",
             submitted_on: proposal.submitted_on ? parseISO(proposal.submitted_on) : null,
             valid_until: proposal.valid_until ? parseISO(proposal.valid_until) : null,
+            current_version: proposal.current_version || 1,
+            updated_at: proposal.updated_at || null,
+            updated_by_email: proposal.updated_by_email || "",
             summary: proposal.summary || "",
             approach: proposal.approach || "",
             timeline: proposal.timeline || "",
@@ -1442,6 +1448,8 @@ export default function App() {
             resetAgreementForm={resetAgreementForm}
             handleAgreementSubmit={handleAgreementSubmit}
             onBulkDelete={handleBulkDeleteAgreements}
+            onReload={loadAll}
+            currentUserEmail={user?.email}
           />
         )}
         {view === "proposals" && (
@@ -1460,6 +1468,8 @@ export default function App() {
             handleProposalUpload={handleProposalUpload}
             onBulkDelete={handleBulkDeleteProposals}
             onBulkSendReminder={handleBulkSendProposalReminders}
+            onReload={loadAll}
+            currentUserEmail={user?.email}
           />
         )}
         {view === "expenses" && (

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import json
 
 from sqlalchemy.orm import Session
 
@@ -46,6 +47,120 @@ def update_settings(db: Session, payload: schemas.SettingsUpdate) -> models.Sett
     db.commit()
     db.refresh(settings)
     return settings
+
+
+def _serialize_datetime(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _json_dump(payload):
+    return json.dumps(payload, default=_serialize_datetime)
+
+
+def _agreement_snapshot(agreement: models.ServiceAgreement):
+    data = {
+        "display_id": agreement.display_id,
+        "client_id": agreement.client_id,
+        "quote_id": agreement.quote_id,
+        "title": agreement.title,
+        "summary": agreement.summary,
+        "content": agreement.content,
+        "document_url": agreement.document_url,
+        "start_date": agreement.start_date,
+        "end_date": agreement.end_date,
+        "scope_of_services": agreement.scope_of_services,
+        "duration": agreement.duration,
+        "availability": agreement.availability,
+        "meetings": agreement.meetings,
+        "access_requirements": agreement.access_requirements,
+        "fees_payments": agreement.fees_payments,
+        "data_protection": agreement.data_protection,
+        "termination": agreement.termination,
+        "company_signatory_name": agreement.company_signatory_name,
+        "company_signatory_title": agreement.company_signatory_title,
+        "company_signed_date": agreement.company_signed_date,
+        "client_signatory_name": agreement.client_signatory_name,
+    }
+    sla_items = [
+        {"sla": item.sla, "timescale": item.timescale} for item in agreement.sla_items or []
+    ]
+    return _json_dump(data), _json_dump(sla_items)
+
+
+def _proposal_snapshot(proposal: models.Proposal):
+    data = {
+        "display_id": proposal.display_id,
+        "client_id": proposal.client_id,
+        "quote_id": proposal.quote_id,
+        "title": proposal.title,
+        "status": proposal.status,
+        "submitted_on": proposal.submitted_on,
+        "valid_until": proposal.valid_until,
+        "summary": proposal.summary,
+        "approach": proposal.approach,
+        "timeline": proposal.timeline,
+        "content": proposal.content,
+    }
+    requirements = [
+        {"description": item.description} for item in proposal.requirements or []
+    ]
+    attachments = [
+        {"filename": item.filename, "file_path": item.file_path}
+        for item in proposal.attachments or []
+    ]
+    return _json_dump(data), _json_dump(requirements), _json_dump(attachments)
+
+
+def create_agreement_version(db: Session, agreement: models.ServiceAgreement, user_id: int | None):
+    next_version = (agreement.current_version or 0) + 1
+    now = datetime.utcnow()
+    agreement.current_version = next_version
+    agreement.updated_at = now
+    agreement.updated_by_user_id = user_id
+    db.commit()
+    db.refresh(agreement)
+    data_json, sla_json = _agreement_snapshot(agreement)
+    version = models.ServiceAgreementVersion(
+        agreement_id=agreement.id,
+        version_number=next_version,
+        title=agreement.title,
+        data_json=data_json,
+        sla_items_json=sla_json,
+        created_at=now,
+        created_by_user_id=user_id,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+def create_proposal_version(db: Session, proposal: models.Proposal, user_id: int | None):
+    next_version = (proposal.current_version or 0) + 1
+    now = datetime.utcnow()
+    proposal.current_version = next_version
+    proposal.updated_at = now
+    proposal.updated_by_user_id = user_id
+    db.commit()
+    db.refresh(proposal)
+    data_json, requirements_json, attachments_json = _proposal_snapshot(proposal)
+    version = models.ProposalVersion(
+        proposal_id=proposal.id,
+        version_number=next_version,
+        title=proposal.title,
+        status=proposal.status,
+        data_json=data_json,
+        requirements_json=requirements_json,
+        attachments_json=attachments_json,
+        created_at=now,
+        created_by_user_id=user_id,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return version
 
 
 def get_user_by_email(db: Session, email: str):
@@ -460,7 +575,7 @@ def update_quote(db: Session, quote: models.Quote, payload: schemas.QuoteUpdate)
     return quote
 
 
-def create_agreement(db: Session, client_id: int, payload: schemas.AgreementCreate):
+def create_agreement(db: Session, client_id: int, payload: schemas.AgreementCreate, user_id: int | None = None):
     data = payload.model_dump()
     display_id = data.get("display_id")
     if display_id:
@@ -482,10 +597,12 @@ def create_agreement(db: Session, client_id: int, payload: schemas.AgreementCrea
         ]
         db.commit()
         db.refresh(agreement)
+    agreement.current_version = 0
+    create_agreement_version(db, agreement, user_id)
     return agreement
 
 
-def update_agreement(db: Session, agreement: models.ServiceAgreement, payload: schemas.AgreementUpdate):
+def update_agreement(db: Session, agreement: models.ServiceAgreement, payload: schemas.AgreementUpdate, user_id: int | None = None):
     data = payload.model_dump(exclude_unset=True)
     display_id = data.get("display_id")
     if display_id:
@@ -501,10 +618,11 @@ def update_agreement(db: Session, agreement: models.ServiceAgreement, payload: s
             )
     db.commit()
     db.refresh(agreement)
+    create_agreement_version(db, agreement, user_id)
     return agreement
 
 
-def create_proposal(db: Session, client_id: int, payload: schemas.ProposalCreate):
+def create_proposal(db: Session, client_id: int, payload: schemas.ProposalCreate, user_id: int | None = None):
     data = payload.model_dump()
     display_id = data.get("display_id")
     if display_id:
@@ -535,10 +653,12 @@ def create_proposal(db: Session, client_id: int, payload: schemas.ProposalCreate
     if requirements or attachments:
         db.commit()
         db.refresh(proposal)
+    proposal.current_version = 0
+    create_proposal_version(db, proposal, user_id)
     return proposal
 
 
-def update_proposal(db: Session, proposal: models.Proposal, payload: schemas.ProposalUpdate):
+def update_proposal(db: Session, proposal: models.Proposal, payload: schemas.ProposalUpdate, user_id: int | None = None):
     data = payload.model_dump(exclude_unset=True)
     display_id = data.get("display_id")
     if display_id:
@@ -561,6 +681,63 @@ def update_proposal(db: Session, proposal: models.Proposal, payload: schemas.Pro
         ]
     db.commit()
     db.refresh(proposal)
+    create_proposal_version(db, proposal, user_id)
+    return proposal
+
+
+def restore_agreement_version(
+    db: Session,
+    agreement: models.ServiceAgreement,
+    version: models.ServiceAgreementVersion,
+    user_id: int | None = None,
+):
+    data = json.loads(version.data_json or "{}")
+    sla_items = json.loads(version.sla_items_json or "[]")
+    date_fields = {"start_date", "end_date", "company_signed_date"}
+    for field, value in data.items():
+        if field in date_fields and value:
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                pass
+        setattr(agreement, field, value)
+    agreement.sla_items = [
+        models.ServiceAgreementSLA(sla=item["sla"], timescale=item["timescale"])
+        for item in sla_items
+    ]
+    db.commit()
+    db.refresh(agreement)
+    create_agreement_version(db, agreement, user_id)
+    return agreement
+
+
+def restore_proposal_version(
+    db: Session,
+    proposal: models.Proposal,
+    version: models.ProposalVersion,
+    user_id: int | None = None,
+):
+    data = json.loads(version.data_json or "{}")
+    requirements = json.loads(version.requirements_json or "[]")
+    attachments = json.loads(version.attachments_json or "[]")
+    date_fields = {"submitted_on", "valid_until"}
+    for field, value in data.items():
+        if field in date_fields and value:
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                pass
+        setattr(proposal, field, value)
+    proposal.requirements = [
+        models.ProposalRequirement(description=item["description"]) for item in requirements
+    ]
+    proposal.attachments = [
+        models.ProposalAttachment(filename=item["filename"], file_path=item["file_path"])
+        for item in attachments
+    ]
+    db.commit()
+    db.refresh(proposal)
+    create_proposal_version(db, proposal, user_id)
     return proposal
 
 
