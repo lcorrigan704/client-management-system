@@ -43,6 +43,7 @@ const useEmailEntities = ({
                 "Unknown client"
               }`,
               clientId: item.client_id,
+              attachments: item.attachments || [],
               email:
                 clientMap.get(item.client_id)?.contact_email ||
                 clientMap.get(item.client_id)?.email,

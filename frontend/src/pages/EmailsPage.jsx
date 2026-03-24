@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
+import { API_URL } from "@/api/client";
 
 export default function EmailsPage({
   emailResponse,
@@ -17,17 +18,57 @@ export default function EmailsPage({
   emailEntityOptions,
   clients,
 }) {
-  const handleDownloadPdf = () => {
+  const selectedEntity = emailEntityOptions.items.find((item) => item.id === emailForm.entity_id);
+
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const downloadBlob = async (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    await wait(150);
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPdf = async () => {
     if (!emailResponse?.pdf_base64) return;
     const byteCharacters = atob(emailResponse.pdf_base64);
     const byteNumbers = Array.from(byteCharacters, (char) => char.charCodeAt(0));
     const blob = new Blob([new Uint8Array(byteNumbers)], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = emailResponse.pdf_filename || "document.pdf";
-    link.click();
-    URL.revokeObjectURL(url);
+    await downloadBlob(blob, emailResponse.pdf_filename || "document.pdf");
+  };
+
+  const downloadEntityAttachments = async () => {
+    const attachments = selectedEntity?.attachments || [];
+    await Promise.all(
+      attachments.map(async (attachment) => {
+        const filePath = attachment.file_path || "";
+        if (!filePath) return;
+        const url = filePath.startsWith("http")
+          ? filePath
+          : `${API_URL}/${filePath.replace(/^\//, "")}`;
+        const response = await fetch(url, { credentials: "include" });
+        if (!response.ok) return;
+        const blob = await response.blob();
+        await downloadBlob(
+          blob,
+          attachment.filename || filePath.split("/").pop() || "attachment"
+        );
+      })
+    );
+  };
+
+  const handleOpenMailClient = async () => {
+    if (emailResponse?.pdf_base64) {
+      await handleDownloadPdf();
+    }
+    await downloadEntityAttachments();
+    await wait(250);
+    window.location.href = buildMailto();
   };
 
   return (
@@ -64,18 +105,22 @@ export default function EmailsPage({
                 <Button type="button" variant="secondary" onClick={handleCopyEmail}>
                   Copy email
                 </Button>
-                <a
-                  className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  href={buildMailto()}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleOpenMailClient}
                 >
                   Open in mail client
-                </a>
+                </Button>
                 {emailResponse.pdf_base64 ? (
                   <Button type="button" variant="outline" onClick={handleDownloadPdf}>
                     Download PDF
                   </Button>
                 ) : null}
               </div>
+              <p className="text-xs text-muted-foreground">
+                Opening the mail client will download the generated PDF and any proposal attachments first so you can attach them manually.
+              </p>
               <p className="text-xs text-muted-foreground">{emailResponse.message}</p>
             </div>
           ) : (

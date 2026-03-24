@@ -287,6 +287,11 @@ export default function AgreementsPage({
   const availableQuotes = agreementForm.client_id
     ? safeQuotes.filter((quote) => String(quote.client_id) === String(agreementForm.client_id))
     : safeQuotes;
+  const hasSelectedQuoteOption = availableQuotes.some(
+    (quote) => String(quote.id) === String(agreementForm.quote_id)
+  );
+  const quoteSelectValue = hasSelectedQuoteOption ? agreementForm.quote_id : undefined;
+  const isMissingSelectedQuote = Boolean(agreementForm.quote_id) && !hasSelectedQuoteOption;
 
   const steps = useMemo(
     () => [
@@ -463,7 +468,7 @@ export default function AgreementsPage({
                 <div className={fieldClass}>
                   {renderLabel("Quote", "quote_id")}
                   <Select
-                    value={agreementForm.quote_id}
+                    value={quoteSelectValue}
                     onValueChange={(value) =>
                       setAgreementForm({ ...agreementForm, quote_id: value })
                     }
@@ -485,6 +490,11 @@ export default function AgreementsPage({
                       )}
                     </SelectContent>
                   </Select>
+                  {isMissingSelectedQuote ? (
+                    <p className="text-xs text-muted-foreground">
+                      The previously linked quote is no longer available. Select a replacement to continue.
+                    </p>
+                  ) : null}
                 </div>
                 <div className={fieldClass}>
                   {renderLabel("Title", "title")}

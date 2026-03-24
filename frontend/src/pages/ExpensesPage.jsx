@@ -49,6 +49,7 @@ export default function ExpensesPage({
   ];
   const exportConfig = {
     label: "Export expenses",
+    selectedLabel: "Export selected",
     mode: "zip",
     filenameBase: "expenses",
     parent: {
