@@ -24,8 +24,17 @@ def ensure_display_id_unique(db: Session, model, display_id: str, exclude_id: in
 def get_or_create_settings(db: Session) -> models.Settings:
     settings = db.query(models.Settings).first()
     if settings:
+        changed = False
         if not settings.expense_prefix:
             settings.expense_prefix = "EXP"
+            changed = True
+        if not getattr(settings, "credit_note_prefix", None):
+            settings.credit_note_prefix = "CN"
+            changed = True
+        if not getattr(settings, "refund_prefix", None):
+            settings.refund_prefix = "RF"
+            changed = True
+        if changed:
             db.commit()
             db.refresh(settings)
         return settings
@@ -510,6 +519,153 @@ def mark_invoice_paid(db: Session, invoice: models.Invoice):
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+def _credited_amount_for_invoice_line(
+    db: Session,
+    invoice_line_item_id: int,
+    exclude_credit_note_id: int | None = None,
+):
+    query = db.query(models.CreditNoteLineItem).filter(
+        models.CreditNoteLineItem.invoice_line_item_id == invoice_line_item_id
+    )
+    if exclude_credit_note_id is not None:
+        query = query.filter(models.CreditNoteLineItem.credit_note_id != exclude_credit_note_id)
+    return sum(float(item.credited_amount or 0) for item in query.all())
+
+
+def _refunded_amount_for_credit_note(
+    db: Session,
+    credit_note_id: int,
+    exclude_refund_id: int | None = None,
+):
+    query = db.query(models.Refund).filter(models.Refund.credit_note_id == credit_note_id)
+    if exclude_refund_id is not None:
+        query = query.filter(models.Refund.id != exclude_refund_id)
+    return sum(float(item.amount or 0) for item in query.all())
+
+
+def get_credit_notes(db: Session):
+    return db.query(models.CreditNote).order_by(models.CreditNote.issued_at.desc()).all()
+
+
+def get_refunds(db: Session):
+    return db.query(models.Refund).order_by(models.Refund.refunded_at.desc()).all()
+
+
+def create_credit_note(db: Session, payload: schemas.CreditNoteCreate):
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == payload.invoice_id).first()
+    if not invoice:
+        raise ValueError("Invoice not found.")
+    if not payload.line_items:
+        raise ValueError("At least one credit line is required.")
+
+    credit_note = models.CreditNote(
+        client_id=invoice.client_id,
+        invoice_id=invoice.id,
+        issued_at=payload.issued_at or datetime.utcnow(),
+        notes=payload.notes,
+        total_amount=0,
+    )
+    db.add(credit_note)
+    db.commit()
+    db.refresh(credit_note)
+
+    total_amount = 0.0
+    line_items = []
+    invoice_line_item_ids = {item.id for item in invoice.line_items}
+    for item in payload.line_items:
+        if item.invoice_line_item_id not in invoice_line_item_ids:
+            raise ValueError("Credit line item does not belong to the selected invoice.")
+        invoice_line = next(
+            line for line in invoice.line_items if line.id == item.invoice_line_item_id
+        )
+        source_total = float(invoice_line.quantity or 0) * float(invoice_line.unit_amount or 0)
+        already_credited = _credited_amount_for_invoice_line(db, invoice_line.id)
+        remaining = source_total - already_credited
+        if item.credited_amount <= 0:
+            raise ValueError("Credited amount must be greater than zero.")
+        if float(item.credited_amount) > remaining + 0.0001:
+            raise ValueError("Credited amount exceeds the remaining line value.")
+        if item.credited_quantity <= 0:
+            raise ValueError("Credited quantity must be greater than zero.")
+        if float(item.credited_quantity) > float(invoice_line.quantity or 0) + 0.0001:
+            raise ValueError("Credited quantity exceeds the source line quantity.")
+        line_items.append(
+            models.CreditNoteLineItem(
+                invoice_line_item_id=invoice_line.id,
+                description=invoice_line.description,
+                source_unit_amount=invoice_line.unit_amount,
+                credited_quantity=item.credited_quantity,
+                credited_amount=item.credited_amount,
+            )
+        )
+        total_amount += float(item.credited_amount)
+
+    credit_note.line_items = line_items
+    credit_note.total_amount = total_amount
+    settings = get_or_create_settings(db)
+    credit_note.display_id = build_display_id(settings.credit_note_prefix, credit_note.id)
+    db.commit()
+    db.refresh(credit_note)
+    return credit_note
+
+
+def update_credit_note(db: Session, credit_note: models.CreditNote, payload: schemas.CreditNoteUpdate):
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(credit_note, field, value)
+    db.commit()
+    db.refresh(credit_note)
+    return credit_note
+
+
+def create_refund(db: Session, payload: schemas.RefundCreate):
+    credit_note = db.query(models.CreditNote).filter(models.CreditNote.id == payload.credit_note_id).first()
+    if not credit_note:
+        raise ValueError("Credit note not found.")
+    refunded_amount = _refunded_amount_for_credit_note(db, credit_note.id)
+    remaining = float(credit_note.total_amount or 0) - refunded_amount
+    if payload.amount <= 0:
+        raise ValueError("Refund amount must be greater than zero.")
+    if float(payload.amount) > remaining + 0.0001:
+        raise ValueError("Refund amount exceeds the remaining credit note balance.")
+
+    refund = models.Refund(
+        credit_note_id=credit_note.id,
+        client_id=credit_note.client_id,
+        invoice_id=credit_note.invoice_id,
+        refunded_at=payload.refunded_at or datetime.utcnow(),
+        amount=payload.amount,
+        notes=payload.notes,
+    )
+    db.add(refund)
+    db.commit()
+    db.refresh(refund)
+    settings = get_or_create_settings(db)
+    refund.display_id = build_display_id(settings.refund_prefix, refund.id)
+    db.commit()
+    db.refresh(refund)
+    return refund
+
+
+def update_refund(db: Session, refund: models.Refund, payload: schemas.RefundUpdate):
+    data = payload.model_dump(exclude_unset=True)
+    if "amount" in data:
+        amount = float(data["amount"] or 0)
+        refunded_amount = _refunded_amount_for_credit_note(
+            db, refund.credit_note_id, exclude_refund_id=refund.id
+        )
+        remaining = float(refund.credit_note.total_amount or 0) - refunded_amount
+        if amount <= 0:
+            raise ValueError("Refund amount must be greater than zero.")
+        if amount > remaining + 0.0001:
+            raise ValueError("Refund amount exceeds the remaining credit note balance.")
+    for field, value in data.items():
+        setattr(refund, field, value)
+    db.commit()
+    db.refresh(refund)
+    return refund
 
 
 def create_quote(db: Session, client_id: int, payload: schemas.QuoteCreate):

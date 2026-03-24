@@ -6,6 +6,8 @@ const useAppData = ({ onError, enabled = true } = {}) => {
   const [clients, setClients] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  const [creditNotes, setCreditNotes] = useState([]);
+  const [refunds, setRefunds] = useState([]);
   const [agreements, setAgreements] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -17,6 +19,8 @@ const useAppData = ({ onError, enabled = true } = {}) => {
         clientsData,
         invoicesData,
         quotesData,
+        creditNotesData,
+        refundsData,
         agreementsData,
         proposalsData,
         expensesData,
@@ -26,6 +30,8 @@ const useAppData = ({ onError, enabled = true } = {}) => {
           api.getClients(),
           api.getInvoices(),
           api.getQuotes(),
+          api.getCreditNotes(),
+          api.getRefunds(),
           api.getAgreements(),
           api.getProposals(),
           api.getExpenses(),
@@ -34,6 +40,8 @@ const useAppData = ({ onError, enabled = true } = {}) => {
       setClients(clientsData);
       setInvoices(invoicesData);
       setQuotes(quotesData);
+      setCreditNotes(creditNotesData);
+      setRefunds(refundsData);
       setAgreements(agreementsData);
       setProposals(proposalsData);
       setExpenses(expensesData);
@@ -61,6 +69,8 @@ const useAppData = ({ onError, enabled = true } = {}) => {
     clients,
     invoices,
     quotes,
+    creditNotes,
+    refunds,
     agreements,
     proposals,
     expenses,

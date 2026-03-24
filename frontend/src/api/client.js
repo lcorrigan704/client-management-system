@@ -41,6 +41,8 @@ const api = {
   getClients: () => request("/clients"),
   getInvoices: () => request("/invoices"),
   getQuotes: () => request("/quotes"),
+  getCreditNotes: () => request("/credit-notes"),
+  getRefunds: () => request("/refunds"),
   getAgreements: () => request("/agreements"),
   getProposals: () => request("/proposals"),
   getExpenses: () => request("/expenses"),
@@ -62,6 +64,16 @@ const api = {
     request(`/invoices/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   markInvoicePaid: (id) => request(`/invoices/${id}/mark-paid`, { method: "POST" }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: "DELETE" }),
+  createCreditNote: (payload) =>
+    request("/credit-notes", { method: "POST", body: JSON.stringify(payload) }),
+  updateCreditNote: (id, payload) =>
+    request(`/credit-notes/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteCreditNote: (id) => request(`/credit-notes/${id}`, { method: "DELETE" }),
+  createRefund: (payload) =>
+    request("/refunds", { method: "POST", body: JSON.stringify(payload) }),
+  updateRefund: (id, payload) =>
+    request(`/refunds/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteRefund: (id) => request(`/refunds/${id}`, { method: "DELETE" }),
   createQuote: (clientId, payload) =>
     request(`/clients/${clientId}/quotes`, {
       method: "POST",

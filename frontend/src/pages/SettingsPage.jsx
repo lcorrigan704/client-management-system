@@ -101,7 +101,7 @@ export default function SettingsPage({
       <Card>
         <CardHeader>
           <CardTitle>Document prefixes</CardTitle>
-          <CardDescription>Controls the prefix used in display IDs.</CardDescription>
+        <CardDescription>Controls the prefix used in display IDs.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className={fieldClass}>
@@ -137,6 +137,20 @@ export default function SettingsPage({
             <Input
               value={settings?.expense_prefix || ""}
               onChange={(event) => updateSettings({ expense_prefix: event.target.value })}
+            />
+          </div>
+          <div className={fieldClass}>
+            <label className={labelClass}>Credit note prefix</label>
+            <Input
+              value={settings?.credit_note_prefix || ""}
+              onChange={(event) => updateSettings({ credit_note_prefix: event.target.value })}
+            />
+          </div>
+          <div className={fieldClass}>
+            <label className={labelClass}>Refund prefix</label>
+            <Input
+              value={settings?.refund_prefix || ""}
+              onChange={(event) => updateSettings({ refund_prefix: event.target.value })}
             />
           </div>
         </CardContent>

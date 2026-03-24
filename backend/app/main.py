@@ -560,6 +560,113 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted"}
 
 
+@app.get("/credit-notes", response_model=list[schemas.CreditNoteOut])
+def list_credit_notes(db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_credit_notes(db)
+
+
+@app.post("/credit-notes", response_model=schemas.CreditNoteOut)
+def create_credit_note(
+    payload: schemas.CreditNoteCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    try:
+        return crud.create_credit_note(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/credit-notes/{credit_note_id}", response_model=schemas.CreditNoteOut)
+def get_credit_note(
+    credit_note_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    credit_note = db.query(models.CreditNote).filter(models.CreditNote.id == credit_note_id).first()
+    if not credit_note:
+        raise HTTPException(status_code=404, detail="Credit note not found")
+    return credit_note
+
+
+@app.put("/credit-notes/{credit_note_id}", response_model=schemas.CreditNoteOut)
+def update_credit_note(
+    credit_note_id: int,
+    payload: schemas.CreditNoteUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    credit_note = db.query(models.CreditNote).filter(models.CreditNote.id == credit_note_id).first()
+    if not credit_note:
+        raise HTTPException(status_code=404, detail="Credit note not found")
+    return crud.update_credit_note(db, credit_note, payload)
+
+
+@app.delete("/credit-notes/{credit_note_id}")
+def delete_credit_note(
+    credit_note_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    credit_note = db.query(models.CreditNote).filter(models.CreditNote.id == credit_note_id).first()
+    if not credit_note:
+        raise HTTPException(status_code=404, detail="Credit note not found")
+    db.delete(credit_note)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@app.get("/refunds", response_model=list[schemas.RefundOut])
+def list_refunds(db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_refunds(db)
+
+
+@app.post("/refunds", response_model=schemas.RefundOut)
+def create_refund(
+    payload: schemas.RefundCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    try:
+        return crud.create_refund(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/refunds/{refund_id}", response_model=schemas.RefundOut)
+def get_refund(refund_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    refund = db.query(models.Refund).filter(models.Refund.id == refund_id).first()
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    return refund
+
+
+@app.put("/refunds/{refund_id}", response_model=schemas.RefundOut)
+def update_refund(
+    refund_id: int,
+    payload: schemas.RefundUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    refund = db.query(models.Refund).filter(models.Refund.id == refund_id).first()
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    try:
+        return crud.update_refund(db, refund, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/refunds/{refund_id}")
+def delete_refund(refund_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    refund = db.query(models.Refund).filter(models.Refund.id == refund_id).first()
+    if not refund:
+        raise HTTPException(status_code=404, detail="Refund not found")
+    db.delete(refund)
+    db.commit()
+    return {"status": "deleted"}
+
+
 @app.get("/quotes", response_model=list[schemas.QuoteOut])
 def list_quotes(db: Session = Depends(get_db)):
     return db.query(models.Quote).order_by(models.Quote.issued_at.desc()).all()
