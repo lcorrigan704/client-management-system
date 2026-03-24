@@ -163,6 +163,19 @@ def create_proposal_version(db: Session, proposal: models.Proposal, user_id: int
     return version
 
 
+def _resolve_restored_quote_id(
+    db: Session,
+    client_id: int,
+    quote_id: int | None,
+) -> int | None:
+    if not quote_id:
+        return None
+    quote = db.query(models.Quote).filter(models.Quote.id == quote_id).first()
+    if not quote or quote.client_id != client_id:
+        return None
+    return quote_id
+
+
 def get_user_by_email(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
 
@@ -694,6 +707,12 @@ def restore_agreement_version(
     data = json.loads(version.data_json or "{}")
     sla_items = json.loads(version.sla_items_json or "[]")
     date_fields = {"start_date", "end_date", "company_signed_date"}
+    restored_client_id = data.get("client_id", agreement.client_id)
+    data["quote_id"] = _resolve_restored_quote_id(
+        db,
+        restored_client_id,
+        data.get("quote_id"),
+    )
     for field, value in data.items():
         if field in date_fields and value:
             try:
@@ -721,6 +740,12 @@ def restore_proposal_version(
     requirements = json.loads(version.requirements_json or "[]")
     attachments = json.loads(version.attachments_json or "[]")
     date_fields = {"submitted_on", "valid_until"}
+    restored_client_id = data.get("client_id", proposal.client_id)
+    data["quote_id"] = _resolve_restored_quote_id(
+        db,
+        restored_client_id,
+        data.get("quote_id"),
+    )
     for field, value in data.items():
         if field in date_fields and value:
             try:

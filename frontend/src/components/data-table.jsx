@@ -23,6 +23,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -62,7 +69,17 @@ export function DataTable({
             table.getIsAllRowsSelected() ||
             (table.getIsSomeRowsSelected() && "indeterminate")
           }
-          onCheckedChange={(value) => table.toggleAllRowsSelected(!!value)}
+          onCheckedChange={(value) => {
+            if (value) {
+              const nextSelection = table.getFilteredRowModel().rows.reduce((acc, row) => {
+                acc[row.id] = true;
+                return acc;
+              }, {});
+              setRowSelection(nextSelection);
+              return;
+            }
+            table.resetRowSelection();
+          }}
           aria-label="Select all"
         />
       ),
@@ -114,6 +131,7 @@ export function DataTable({
       .getFilteredRowModel()
       .rows.reduce((sum, row) => sum + Number(row.original?.[totalKey] || 0), 0);
   }, [data, totalKey, columnFilters, sorting]);
+  const pageSizeOptions = React.useMemo(() => [10, 20, 50, 100], []);
 
   const buildCsv = React.useCallback((rows, columnsConfig) => {
     if (!columnsConfig || columnsConfig.length === 0) return "";
@@ -130,11 +148,13 @@ export function DataTable({
     return [headers.join(","), ...body].join("\n");
   }, []);
 
-  const handleExport = React.useCallback(async () => {
+  const handleExport = React.useCallback(async (rows) => {
     if (!exportConfig || isExporting) return;
     setIsExporting(true);
     try {
-      const parentRows = table.getFilteredRowModel().rows.map((row) => row.original);
+      const parentRows = rows?.length
+        ? rows
+        : table.getFilteredRowModel().rows.map((row) => row.original);
       const parentData = exportConfig.parent?.mapRow
         ? parentRows.map(exportConfig.parent.mapRow)
         : parentRows;
@@ -192,14 +212,15 @@ export function DataTable({
   }, [buildCsv, exportConfig, isExporting, table]);
 
   const handleBulkActionClick = React.useCallback(
-    (action) => {
+    async (action) => {
       if (action.confirm) {
         setConfirmAction({ action, rows: selectedRows });
       } else {
-        action.onClick(selectedRows);
+        await Promise.resolve(action.onClick(selectedRows));
+        table.resetRowSelection();
       }
     },
-    [selectedRows]
+    [selectedRows, table]
   );
 
   const handleConfirmAction = React.useCallback(async () => {
@@ -223,7 +244,12 @@ export function DataTable({
             className="max-w-xs"
           />
           {exportConfig ? (
-            <Button type="button" variant="outline" onClick={handleExport} disabled={isExporting}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleExport()}
+              disabled={isExporting}
+            >
               {exportConfig.label || "Export"}
             </Button>
           ) : null}
@@ -233,6 +259,17 @@ export function DataTable({
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
           <span className="text-muted-foreground">{selectedRows.length} selected</span>
           <div className="flex flex-wrap items-center gap-2">
+            {exportConfig ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleExport(selectedRows)}
+                disabled={isExporting}
+              >
+                {exportConfig.selectedLabel || "Export selected"}
+              </Button>
+            ) : null}
             {bulkActions.map((action) => (
               <Button
                 key={action.label}
@@ -374,6 +411,22 @@ export function DataTable({
           {table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
         </p>
         <div className="flex items-center gap-2">
+          <span>Rows</span>
+          <Select
+            value={String(table.getState().pagination.pageSize)}
+            onValueChange={(value) => table.setPageSize(Number(value))}
+          >
+            <SelectTrigger className="h-8 w-[88px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pageSizeOptions.map((option) => (
+                <SelectItem key={option} value={String(option)}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             size="sm"

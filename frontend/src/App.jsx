@@ -839,6 +839,27 @@ export default function App() {
     [loadAll]
   );
 
+  const handleBulkMarkInvoicesPaid = useCallback(
+    async (rows) => {
+      if (!rows?.length) return;
+      const unpaidRows = rows.filter((row) => row.status !== "paid");
+      if (!unpaidRows.length) {
+        toast.error("All selected invoices are already paid.");
+        return;
+      }
+      try {
+        await Promise.all(unpaidRows.map((row) => api.markInvoicePaid(row.id)));
+        await loadAll();
+        toast.success(
+          `${unpaidRows.length} invoice${unpaidRows.length === 1 ? "" : "s"} marked as paid.`
+        );
+      } catch (error) {
+        toast.error(error.message || "Unable to update invoices.");
+      }
+    },
+    [loadAll]
+  );
+
   const handleBulkSendInvoiceReminders = useCallback(
     async (rows) => {
       if (!rows?.length) return;
@@ -1412,6 +1433,7 @@ export default function App() {
             resetInvoiceForm={resetInvoiceForm}
             handleInvoiceSubmit={handleInvoiceSubmit}
             handleMarkInvoicePaid={handleMarkInvoicePaid}
+            onBulkMarkPaid={handleBulkMarkInvoicesPaid}
             onBulkDelete={handleBulkDeleteInvoices}
             onBulkSendReminder={handleBulkSendInvoiceReminders}
             emptyInvoice={emptyInvoice}

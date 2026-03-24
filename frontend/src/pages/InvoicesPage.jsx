@@ -24,6 +24,7 @@ export default function InvoicesPage({
   resetInvoiceForm,
   handleInvoiceSubmit,
   handleMarkInvoicePaid,
+  onBulkMarkPaid,
   onBulkDelete,
   onBulkSendReminder,
   emptyInvoice,
@@ -55,6 +56,7 @@ export default function InvoicesPage({
   ];
   const exportConfig = {
     label: "Export invoices",
+    selectedLabel: "Export selected",
     mode: "zip",
     filenameBase: "invoices",
     parent: {
@@ -140,6 +142,17 @@ export default function InvoicesPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Mark as paid",
+                variant: "outline",
+                onClick: (rows) => onBulkMarkPaid?.(rows),
+                confirm: {
+                  title: "Mark selected invoices as paid?",
+                  description:
+                    "This will update the selected unpaid invoices to paid.",
+                  confirmLabel: "Mark as paid",
+                },
+              },
               {
                 label: "Send reminders",
                 variant: "outline",
