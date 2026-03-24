@@ -64,6 +64,9 @@ class Invoice(Base):
     line_items: Mapped[list["InvoiceLineItem"]] = relationship(
         "InvoiceLineItem", back_populates="invoice", cascade="all, delete-orphan"
     )
+    credit_notes: Mapped[list["CreditNote"]] = relationship(
+        "CreditNote", back_populates="invoice", cascade="all, delete-orphan"
+    )
 
 
 class Quote(Base):
@@ -106,6 +109,80 @@ class InvoiceLineItem(Base):
     unit_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="line_items")
+    credit_note_line_items: Mapped[list["CreditNoteLineItem"]] = relationship(
+        "CreditNoteLineItem", back_populates="invoice_line_item"
+    )
+
+
+class CreditNote(Base):
+    __tablename__ = "credit_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    display_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    notes: Mapped[str | None] = mapped_column(Text())
+    total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    client: Mapped["Client"] = relationship("Client")
+    invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="credit_notes")
+    line_items: Mapped[list["CreditNoteLineItem"]] = relationship(
+        "CreditNoteLineItem", back_populates="credit_note", cascade="all, delete-orphan"
+    )
+    refunds: Mapped[list["Refund"]] = relationship(
+        "Refund", back_populates="credit_note", cascade="all, delete-orphan"
+    )
+
+
+class CreditNoteLineItem(Base):
+    __tablename__ = "credit_note_line_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    credit_note_id: Mapped[int] = mapped_column(
+        ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_line_item_id: Mapped[int] = mapped_column(
+        ForeignKey("invoice_line_items.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(String(300), nullable=False)
+    source_unit_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    credited_quantity: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    credited_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+
+    credit_note: Mapped["CreditNote"] = relationship("CreditNote", back_populates="line_items")
+    invoice_line_item: Mapped["InvoiceLineItem"] = relationship(
+        "InvoiceLineItem", back_populates="credit_note_line_items"
+    )
+
+
+class Refund(Base):
+    __tablename__ = "refunds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    display_id: Mapped[str | None] = mapped_column(String(30), unique=True, index=True)
+    credit_note_id: Mapped[int] = mapped_column(
+        ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    refunded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    credit_note: Mapped["CreditNote"] = relationship("CreditNote", back_populates="refunds")
+    client: Mapped["Client"] = relationship("Client")
+    invoice: Mapped["Invoice"] = relationship("Invoice")
 
 
 class QuoteLineItem(Base):
@@ -447,6 +524,8 @@ class Settings(Base):
     proposal_prefix: Mapped[str] = mapped_column(String(20), default="PROP")
     agreement_prefix: Mapped[str] = mapped_column(String(20), default="AGR")
     expense_prefix: Mapped[str] = mapped_column(String(20), default="EXP")
+    credit_note_prefix: Mapped[str] = mapped_column(String(20), default="CN")
+    refund_prefix: Mapped[str] = mapped_column(String(20), default="RF")
 
     fy_start_month: Mapped[int] = mapped_column(Integer, default=1)
     fy_start_day: Mapped[int] = mapped_column(Integer, default=1)

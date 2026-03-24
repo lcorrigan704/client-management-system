@@ -15,7 +15,9 @@ const getInvoiceColumns = ({
   formatDate,
   formatGBP,
   onEdit,
+  onCreateCreditNote,
   onMarkPaid,
+  onViewAdjustments,
   onDelete,
   onGenerateEmail,
   onGeneratePdf,
@@ -67,6 +69,12 @@ const getInvoiceColumns = ({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onGeneratePdf(row.original.id)}>
             Generate PDF
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onCreateCreditNote(row.original)}>
+            Create credit note
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onViewAdjustments(row.original)}>
+            View adjustments
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onSendReminder(row.original.id)}>
             Send reminder

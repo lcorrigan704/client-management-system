@@ -5,6 +5,8 @@ const useYearFilter = ({
   clients,
   invoices,
   quotes,
+  creditNotes,
+  refunds,
   agreements,
   proposals,
   expenses,
@@ -43,6 +45,8 @@ const useYearFilter = ({
     };
     invoices.forEach((invoice) => addYear(invoice.due_date));
     quotes.forEach((quote) => addYear(quote.valid_until));
+    creditNotes.forEach((creditNote) => addYear(creditNote.issued_at));
+    refunds.forEach((refund) => addYear(refund.refunded_at));
     agreements.forEach((agreement) => addYear(agreement.start_date || agreement.created_at));
     proposals.forEach((proposal) => addYear(proposal.valid_until || proposal.submitted_on || proposal.created_at));
     expenses.forEach((expense) => addYear(expense.incurred_date));
@@ -50,7 +54,7 @@ const useYearFilter = ({
     const currentYear = getFiscalYear(new Date().toISOString()) || new Date().getFullYear();
     years.add(currentYear);
     return Array.from(years).sort((a, b) => b - a);
-  }, [agreements, clients, expenses, invoices, proposals, quotes, settings]);
+  }, [agreements, clients, creditNotes, expenses, invoices, proposals, quotes, refunds, settings]);
 
   useEffect(() => {
     if (financialYears.length && selectedYear !== "all") {
@@ -84,6 +88,14 @@ const useYearFilter = ({
     () => quotes.filter((quote) => yearMatches(quote.valid_until || quote.issued_at)),
     [quotes, selectedYear]
   );
+  const filteredCreditNotes = useMemo(
+    () => creditNotes.filter((creditNote) => yearMatches(creditNote.issued_at)),
+    [creditNotes, selectedYear]
+  );
+  const filteredRefunds = useMemo(
+    () => refunds.filter((refund) => yearMatches(refund.refunded_at)),
+    [refunds, selectedYear]
+  );
   const filteredAgreements = useMemo(
     () =>
       agreements.filter((agreement) =>
@@ -107,18 +119,24 @@ const useYearFilter = ({
     const totalQuoted = quotes
       .filter((quote) => yearMatches(quote.valid_until))
       .reduce((sum, quote) => sum + Number(quote.amount || 0), 0);
+    const totalCredited = creditNotes
+      .filter((creditNote) => yearMatches(creditNote.issued_at))
+      .reduce((sum, creditNote) => sum + Number(creditNote.total_amount || 0), 0);
+    const totalRefunded = refunds
+      .filter((refund) => yearMatches(refund.refunded_at))
+      .reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
     const totalInvoiced = invoices
       .filter((invoice) =>
         yearMatches(invoice.due_date) &&
         ["sent", "paid", "overdue"].includes(String(invoice.status || "").toLowerCase())
       )
-      .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+      .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0) - totalCredited;
     const totalPaid = invoices
       .filter((invoice) => (invoice.status === "paid" ? yearMatches(invoice.due_date) : false))
-      .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+      .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0) - totalRefunded;
 
-    return { totalQuoted, totalInvoiced, totalPaid };
-  }, [invoices, quotes, selectedYear]);
+    return { totalQuoted, totalCredited, totalRefunded, totalInvoiced, totalPaid };
+  }, [creditNotes, invoices, quotes, refunds, selectedYear]);
 
   const complianceDates = useMemo(() => {
     const complianceYear =
@@ -150,6 +168,8 @@ const useYearFilter = ({
     filteredClients,
     filteredInvoices,
     filteredQuotes,
+    filteredCreditNotes,
+    filteredRefunds,
     filteredAgreements,
     filteredProposals,
     filteredExpenses,

@@ -8,6 +8,7 @@ import AuthPage from "@/pages/AuthPage";
 import SetupWizard from "@/pages/SetupWizard";
 import ClientsPage from "@/pages/ClientsPage";
 import InvoicesPage from "@/pages/InvoicesPage";
+import RevenueAdjustmentsPage from "@/pages/RevenueAdjustmentsPage";
 import QuotesPage from "@/pages/QuotesPage";
 import AgreementsPage from "@/pages/AgreementsPage";
 import ProposalsPage from "@/pages/ProposalsPage";
@@ -23,6 +24,8 @@ import {
   emptyAgreement,
   emptyProposal,
   emptyExpense,
+  emptyCreditNote,
+  emptyRefund,
 } from "@/constants/defaults";
 import { toDateTime, formatDate, formatGBP } from "@/utils/format";
 import useAppData from "@/hooks/useAppData";
@@ -83,6 +86,8 @@ export default function App() {
     clients,
     invoices,
     quotes,
+    creditNotes,
+    refunds,
     agreements,
     proposals,
     expenses,
@@ -106,6 +111,8 @@ export default function App() {
   const [agreementForm, setAgreementForm] = useState(emptyAgreement);
   const [proposalForm, setProposalForm] = useState(emptyProposal);
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
+  const [creditNoteForm, setCreditNoteForm] = useState(emptyCreditNote);
+  const [refundForm, setRefundForm] = useState(emptyRefund);
   const [users, setUsers] = useState([]);
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [userForm, setUserForm] = useState({
@@ -126,6 +133,8 @@ export default function App() {
   const [editingAgreementId, setEditingAgreementId] = useState(null);
   const [editingProposalId, setEditingProposalId] = useState(null);
   const [editingExpenseId, setEditingExpenseId] = useState(null);
+  const [editingCreditNoteId, setEditingCreditNoteId] = useState(null);
+  const [editingRefundId, setEditingRefundId] = useState(null);
 
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
@@ -133,6 +142,9 @@ export default function App() {
   const [agreementDialogOpen, setAgreementDialogOpen] = useState(false);
   const [proposalDialogOpen, setProposalDialogOpen] = useState(false);
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
+  const [creditNoteDialogOpen, setCreditNoteDialogOpen] = useState(false);
+  const [refundDialogOpen, setRefundDialogOpen] = useState(false);
+  const [selectedAdjustmentInvoiceId, setSelectedAdjustmentInvoiceId] = useState(null);
   const {
     emailForm,
     setEmailForm,
@@ -241,6 +253,14 @@ export default function App() {
   const resetExpenseForm = () => {
     setExpenseForm(emptyExpense);
     setEditingExpenseId(null);
+  };
+  const resetCreditNoteForm = () => {
+    setCreditNoteForm(emptyCreditNote);
+    setEditingCreditNoteId(null);
+  };
+  const resetRefundForm = () => {
+    setRefundForm(emptyRefund);
+    setEditingRefundId(null);
   };
   const resetUserForm = () => {
     setUserForm({
@@ -691,6 +711,69 @@ export default function App() {
     }
   };
 
+  const handleCreditNoteSubmit = async (event) => {
+    event.preventDefault();
+    try {
+      if (editingCreditNoteId) {
+        await api.updateCreditNote(editingCreditNoteId, {
+          issued_at: toDateTime(creditNoteForm.issued_at),
+          notes: creditNoteForm.notes || null,
+        });
+      } else {
+        const lineItems = (creditNoteForm.line_items || [])
+          .filter((item) => Number(item.credited_amount || 0) > 0)
+          .map((item) => ({
+            invoice_line_item_id: Number(item.invoice_line_item_id),
+            credited_quantity: Number(item.credited_quantity || 0),
+            credited_amount: Number(item.credited_amount || 0),
+          }));
+        if (!creditNoteForm.invoice_id || !lineItems.length) {
+          toast.error("Select an invoice and at least one credited line.");
+          return;
+        }
+        await api.createCreditNote({
+          invoice_id: Number(creditNoteForm.invoice_id),
+          issued_at: toDateTime(creditNoteForm.issued_at),
+          notes: creditNoteForm.notes || null,
+          line_items: lineItems,
+        });
+      }
+      resetCreditNoteForm();
+      setCreditNoteDialogOpen(false);
+      await loadAll();
+      toast.success("Credit note saved.");
+    } catch (error) {
+      toast.error(error.message || "Unable to save credit note.");
+    }
+  };
+
+  const handleRefundSubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const payload = {
+        credit_note_id: Number(refundForm.credit_note_id),
+        refunded_at: toDateTime(refundForm.refunded_at),
+        amount: Number(refundForm.amount || 0),
+        notes: refundForm.notes || null,
+      };
+      if (editingRefundId) {
+        await api.updateRefund(editingRefundId, {
+          refunded_at: payload.refunded_at,
+          amount: payload.amount,
+          notes: payload.notes,
+        });
+      } else {
+        await api.createRefund(payload);
+      }
+      resetRefundForm();
+      setRefundDialogOpen(false);
+      await loadAll();
+      toast.success("Refund saved.");
+    } catch (error) {
+      toast.error(error.message || "Unable to save refund.");
+    }
+  };
+
   const handleMarkInvoicePaid = async (invoiceId) => {
     try {
       await api.markInvoicePaid(invoiceId);
@@ -760,6 +843,28 @@ export default function App() {
     }
   };
 
+  const handleDeleteCreditNote = async (creditNoteId) => {
+    if (!creditNoteId) return;
+    try {
+      await api.deleteCreditNote(creditNoteId);
+      await loadAll();
+      toast.success("Credit note deleted.");
+    } catch (error) {
+      toast.error(error.message || "Unable to delete credit note.");
+    }
+  };
+
+  const handleDeleteRefund = async (refundId) => {
+    if (!refundId) return;
+    try {
+      await api.deleteRefund(refundId);
+      await loadAll();
+      toast.success("Refund deleted.");
+    } catch (error) {
+      toast.error(error.message || "Unable to delete refund.");
+    }
+  };
+
   const getEntityEmail = (entityType, entityId) => {
     const id = Number(entityId);
     switch (entityType) {
@@ -824,6 +929,67 @@ export default function App() {
     }));
     setEmailDialogOpen(true);
   };
+
+  const openCreditNoteForInvoice = useCallback(
+    (invoice) => {
+      setSelectedAdjustmentInvoiceId(invoice.id);
+      setView("adjustments");
+      setCreditNoteForm({
+        invoice_id: String(invoice.id),
+        issued_at: new Date(),
+        notes: "",
+        line_items: (invoice.line_items || []).map((item) => ({
+          invoice_line_item_id: item.id,
+          description: item.description,
+          source_quantity: item.quantity,
+          source_unit_amount: item.unit_amount,
+          credited_quantity: item.quantity,
+          credited_amount: "",
+        })),
+      });
+      setEditingCreditNoteId(null);
+      setCreditNoteDialogOpen(true);
+    },
+    []
+  );
+
+  const handleViewInvoiceAdjustments = useCallback((invoice) => {
+    setSelectedAdjustmentInvoiceId(invoice.id);
+    setView("adjustments");
+  }, []);
+
+  const handleEditCreditNote = useCallback((creditNote) => {
+    setCreditNoteForm({
+      invoice_id: String(creditNote.invoice_id),
+      issued_at: creditNote.issued_at ? parseISO(creditNote.issued_at) : null,
+      notes: creditNote.notes || "",
+      line_items: creditNote.line_items || [],
+    });
+    setEditingCreditNoteId(creditNote.id);
+    setCreditNoteDialogOpen(true);
+  }, []);
+
+  const handleCreateRefundForCreditNote = useCallback((creditNote) => {
+    setRefundForm({
+      credit_note_id: String(creditNote.id),
+      refunded_at: new Date(),
+      amount: "",
+      notes: "",
+    });
+    setEditingRefundId(null);
+    setRefundDialogOpen(true);
+  }, []);
+
+  const handleEditRefund = useCallback((refund) => {
+    setRefundForm({
+      credit_note_id: String(refund.credit_note_id),
+      refunded_at: refund.refunded_at ? parseISO(refund.refunded_at) : null,
+      amount: refund.amount,
+      notes: refund.notes || "",
+    });
+    setEditingRefundId(refund.id);
+    setRefundDialogOpen(true);
+  }, []);
 
   const handleBulkDeleteInvoices = useCallback(
     async (rows) => {
@@ -1042,6 +1208,7 @@ export default function App() {
     { id: "clients", label: "Clients" },
     { id: "invoices", label: "Invoices" },
     { id: "quotes", label: "Quotes" },
+    { id: "adjustments", label: "Adjustments" },
     { id: "agreements", label: "Agreements" },
     { id: "proposals", label: "Proposals" },
     { id: "expenses", label: "Expenses" },
@@ -1051,7 +1218,7 @@ export default function App() {
   const navGroups = [
     { label: "Overview", items: ["dashboard"] },
     { label: "Clients", items: ["clients"] },
-    { label: "Revenue", items: ["invoices", "quotes"] },
+    { label: "Revenue", items: ["invoices", "quotes", "adjustments"] },
     { label: "Agreements", items: ["agreements", "proposals"] },
     { label: "Operations", items: ["expenses", "emails"] },
   ]
@@ -1073,10 +1240,13 @@ export default function App() {
     selectedYear,
     setSelectedYear,
     financialYears,
+    yearMatches,
     formatFinancialYearLabel,
     filteredClients,
     filteredInvoices,
     filteredQuotes,
+    filteredCreditNotes,
+    filteredRefunds,
     filteredAgreements,
     filteredProposals,
     filteredExpenses,
@@ -1086,6 +1256,8 @@ export default function App() {
     clients,
     invoices,
     quotes,
+    creditNotes,
+    refunds,
     agreements,
     proposals,
     expenses,
@@ -1098,6 +1270,8 @@ export default function App() {
     clientMap,
     filteredInvoices,
     filteredQuotes,
+    filteredCreditNotes,
+    filteredRefunds,
     filteredAgreements,
     filteredProposals,
   });
@@ -1161,13 +1335,22 @@ export default function App() {
           setEditingInvoiceId(invoice.id);
           setInvoiceDialogOpen(true);
         },
+        onCreateCreditNote: openCreditNoteForInvoice,
         onMarkPaid: handleMarkInvoicePaid,
+        onViewAdjustments: handleViewInvoiceAdjustments,
         onDelete: handleDeleteInvoice,
         onGenerateEmail: (id) => openEmailForEntity("invoice", id, false),
         onGeneratePdf: (id) => handleGeneratePdf("invoice", id),
         onSendReminder: (id) => openEmailForEntity("invoice", id, true),
       }),
-    [clientMap, handleDeleteInvoice, handleMarkInvoicePaid, handleGeneratePdf]
+    [
+      clientMap,
+      handleDeleteInvoice,
+      handleMarkInvoicePaid,
+      handleGeneratePdf,
+      handleViewInvoiceAdjustments,
+      openCreditNoteForInvoice,
+    ]
   );
 
   const quoteColumns = useMemo(
@@ -1454,6 +1637,36 @@ export default function App() {
             onBulkDelete={handleBulkDeleteQuotes}
             onBulkSendReminder={handleBulkSendQuoteReminders}
             emptyQuote={emptyQuote}
+          />
+        )}
+        {view === "adjustments" && (
+          <RevenueAdjustmentsPage
+            creditNotes={creditNotes}
+            refunds={refunds}
+            yearMatches={yearMatches}
+            invoices={filteredInvoices}
+            clients={clients}
+            creditNoteForm={creditNoteForm}
+            setCreditNoteForm={setCreditNoteForm}
+            refundForm={refundForm}
+            setRefundForm={setRefundForm}
+            creditNoteDialogOpen={creditNoteDialogOpen}
+            setCreditNoteDialogOpen={setCreditNoteDialogOpen}
+            refundDialogOpen={refundDialogOpen}
+            setRefundDialogOpen={setRefundDialogOpen}
+            editingCreditNoteId={editingCreditNoteId}
+            editingRefundId={editingRefundId}
+            resetCreditNoteForm={resetCreditNoteForm}
+            resetRefundForm={resetRefundForm}
+            handleCreditNoteSubmit={handleCreditNoteSubmit}
+            handleRefundSubmit={handleRefundSubmit}
+            onEditCreditNote={handleEditCreditNote}
+            onEditRefund={handleEditRefund}
+            onDeleteCreditNote={handleDeleteCreditNote}
+            onDeleteRefund={handleDeleteRefund}
+            onCreateRefundForCreditNote={handleCreateRefundForCreditNote}
+            selectedInvoiceId={selectedAdjustmentInvoiceId}
+            clearInvoiceFilter={() => setSelectedAdjustmentInvoiceId(null)}
           />
         )}
         {view === "agreements" && (

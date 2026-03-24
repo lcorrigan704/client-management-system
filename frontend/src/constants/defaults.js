@@ -98,6 +98,20 @@ const emptyExpense = {
   receipts: [],
 };
 
+const emptyCreditNote = {
+  invoice_id: "",
+  issued_at: null,
+  notes: "",
+  line_items: [],
+};
+
+const emptyRefund = {
+  credit_note_id: "",
+  refunded_at: null,
+  amount: "",
+  notes: "",
+};
+
 const emptyEmailDraft = {
   entity_type: "invoice",
   entity_id: "",
@@ -115,6 +129,8 @@ const defaultSettings = {
   proposal_prefix: "PROP",
   agreement_prefix: "AGR",
   expense_prefix: "EXP",
+  credit_note_prefix: "CN",
+  refund_prefix: "RF",
   fy_start_month: 1,
   fy_start_day: 1,
   fy_end_month: 12,
@@ -147,6 +163,8 @@ export {
   emptyAgreement,
   emptyProposal,
   emptyExpense,
+  emptyCreditNote,
+  emptyRefund,
   emptyEmailDraft,
   defaultSettings,
 };

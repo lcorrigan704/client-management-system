@@ -68,6 +68,80 @@ class LineItemOut(LineItemBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CreditLineItemBase(BaseModel):
+    invoice_line_item_id: int
+    credited_quantity: float
+    credited_amount: float
+
+
+class CreditNoteLineItemOut(BaseModel):
+    id: int
+    invoice_line_item_id: int
+    description: str
+    source_unit_amount: float
+    credited_quantity: float
+    credited_amount: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CreditNoteBase(BaseModel):
+    issued_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class CreditNoteCreate(CreditNoteBase):
+    invoice_id: int
+    line_items: list[CreditLineItemBase]
+
+
+class CreditNoteUpdate(BaseModel):
+    issued_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class CreditNoteOut(CreditNoteBase):
+    id: int
+    display_id: Optional[str] = None
+    client_id: int
+    invoice_id: int
+    total_amount: float
+    created_at: datetime
+    line_items: list[CreditNoteLineItemOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RefundBase(BaseModel):
+    refunded_at: Optional[datetime] = None
+    amount: float
+    notes: Optional[str] = None
+
+
+class RefundCreate(RefundBase):
+    credit_note_id: int
+
+
+class RefundUpdate(BaseModel):
+    refunded_at: Optional[datetime] = None
+    amount: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class RefundOut(BaseModel):
+    id: int
+    display_id: Optional[str] = None
+    credit_note_id: int
+    client_id: int
+    invoice_id: int
+    refunded_at: datetime
+    amount: float
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class InvoiceCreate(InvoiceBase):
     display_id: Optional[str] = None
     is_legacy: Optional[bool] = None
@@ -453,6 +527,8 @@ class AuthSetupRequest(BaseModel):
     proposal_prefix: str | None = None
     agreement_prefix: str | None = None
     expense_prefix: str | None = None
+    credit_note_prefix: str | None = None
+    refund_prefix: str | None = None
     fy_start_month: int | None = None
     fy_start_day: int | None = None
     fy_end_month: int | None = None
@@ -539,6 +615,8 @@ class SettingsBase(BaseModel):
     proposal_prefix: str
     agreement_prefix: str
     expense_prefix: str
+    credit_note_prefix: str
+    refund_prefix: str
     fy_start_month: int
     fy_start_day: int
     fy_end_month: int
@@ -579,6 +657,8 @@ class SettingsUpdate(BaseModel):
     proposal_prefix: str | None = None
     agreement_prefix: str | None = None
     expense_prefix: str | None = None
+    credit_note_prefix: str | None = None
+    refund_prefix: str | None = None
     fy_start_month: int | None = None
     fy_start_day: int | None = None
     fy_end_month: int | None = None
