@@ -550,6 +550,44 @@ def mark_invoice_paid(invoice_id: int, db: Session = Depends(get_db)):
     return crud.mark_invoice_paid(db, invoice)
 
 
+@app.get("/payments", response_model=list[schemas.InvoicePaymentOut])
+def list_payments(db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_payments(db)
+
+
+@app.get("/invoices/{invoice_id}/payments", response_model=list[schemas.InvoicePaymentOut])
+def list_invoice_payments(invoice_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice.payments
+
+
+@app.post("/invoices/{invoice_id}/payments", response_model=schemas.InvoicePaymentOut)
+def create_invoice_payment(
+    invoice_id: int,
+    payload: schemas.InvoicePaymentCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    try:
+        return crud.create_invoice_payment(db, invoice, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/payments/{payment_id}")
+def delete_payment(payment_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    payment = db.query(models.InvoicePayment).filter(models.InvoicePayment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    crud.delete_invoice_payment(db, payment)
+    return {"status": "deleted"}
+
+
 @app.delete("/invoices/{invoice_id}")
 def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
@@ -619,6 +657,16 @@ def delete_credit_note(
 @app.get("/refunds", response_model=list[schemas.RefundOut])
 def list_refunds(db: Session = Depends(get_db), user=Depends(require_user)):
     return crud.get_refunds(db)
+
+
+@app.get("/tax/vat-summary", response_model=schemas.VatSummaryOut)
+def vat_summary(db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_vat_summary(db)
+
+
+@app.get("/tax/corporation-summary", response_model=schemas.CorporationTaxSummaryOut)
+def corporation_tax_summary(db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_corporation_tax_summary(db)
 
 
 @app.post("/refunds", response_model=schemas.RefundOut)

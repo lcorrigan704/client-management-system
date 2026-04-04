@@ -49,6 +49,13 @@ class ClientOut(ClientBase):
 class InvoiceBase(BaseModel):
     title: str
     amount: float
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: float = 0
+    tax_code: Optional[str] = "standard"
+    tax_kind: Optional[str] = "vat"
+    tax_inclusive: bool = False
     status: Optional[str] = "draft"
     issued_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
@@ -60,10 +67,17 @@ class LineItemBase(BaseModel):
     description: str
     quantity: float
     unit_amount: float
+    tax_rate: float = 0
+    tax_code: Optional[str] = "standard"
+    tax_kind: Optional[str] = "vat"
+    tax_inclusive: bool = False
 
 
 class LineItemOut(LineItemBase):
     id: int
+    net_amount: float = 0
+    tax_amount: float = 0
+    gross_amount: float = 0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -81,6 +95,13 @@ class CreditNoteLineItemOut(BaseModel):
     source_unit_amount: float
     credited_quantity: float
     credited_amount: float
+    net_amount: float = 0
+    tax_amount: float = 0
+    gross_amount: float = 0
+    tax_rate: float = 0
+    tax_code: Optional[str] = None
+    tax_kind: Optional[str] = None
+    tax_inclusive: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -105,6 +126,9 @@ class CreditNoteOut(CreditNoteBase):
     display_id: Optional[str] = None
     client_id: int
     invoice_id: int
+    net_amount: float = 0
+    tax_amount: float = 0
+    gross_amount: float = 0
     total_amount: float
     created_at: datetime
     line_items: list[CreditNoteLineItemOut] = []
@@ -135,6 +159,9 @@ class RefundOut(BaseModel):
     client_id: int
     invoice_id: int
     refunded_at: datetime
+    net_amount: float = 0
+    tax_amount: float = 0
+    gross_amount: float = 0
     amount: float
     notes: Optional[str] = None
     created_at: datetime
@@ -158,6 +185,13 @@ class InvoiceCreate(InvoiceBase):
 class InvoiceUpdate(BaseModel):
     title: Optional[str] = None
     amount: Optional[float] = None
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: Optional[float] = None
+    tax_code: Optional[str] = None
+    tax_kind: Optional[str] = None
+    tax_inclusive: Optional[bool] = None
     status: Optional[str] = None
     issued_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
@@ -184,6 +218,13 @@ class InvoiceOut(InvoiceBase):
 class QuoteBase(BaseModel):
     title: str
     amount: float
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: float = 0
+    tax_code: Optional[str] = "standard"
+    tax_kind: Optional[str] = "vat"
+    tax_inclusive: bool = False
     status: Optional[str] = "draft"
     valid_until: Optional[datetime] = None
     notes: Optional[str] = None
@@ -198,6 +239,13 @@ class QuoteCreate(QuoteBase):
 class QuoteUpdate(BaseModel):
     title: Optional[str] = None
     amount: Optional[float] = None
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: Optional[float] = None
+    tax_code: Optional[str] = None
+    tax_kind: Optional[str] = None
+    tax_inclusive: Optional[bool] = None
     status: Optional[str] = None
     valid_until: Optional[datetime] = None
     notes: Optional[str] = None
@@ -452,6 +500,14 @@ class UserSearchOut(BaseModel):
 class ExpenseBase(BaseModel):
     title: str
     amount: float
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: float = 0
+    tax_code: Optional[str] = "standard"
+    tax_kind: Optional[str] = "vat"
+    tax_inclusive: bool = False
+    vat_reclaimable: bool = False
     incurred_date: Optional[datetime] = None
     notes: Optional[str] = None
     user_id: Optional[int] = None
@@ -477,6 +533,14 @@ class ExpenseCreate(ExpenseBase):
 class ExpenseUpdate(BaseModel):
     title: Optional[str] = None
     amount: Optional[float] = None
+    net_amount: Optional[float] = None
+    tax_amount: Optional[float] = None
+    gross_amount: Optional[float] = None
+    tax_rate: Optional[float] = None
+    tax_code: Optional[str] = None
+    tax_kind: Optional[str] = None
+    tax_inclusive: Optional[bool] = None
+    vat_reclaimable: Optional[bool] = None
     incurred_date: Optional[datetime] = None
     notes: Optional[str] = None
     client_id: Optional[int] = None
@@ -495,6 +559,65 @@ class ExpenseOut(ExpenseBase):
     created_at: datetime
     receipts: list[ExpenseReceiptOut] = []
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaymentTaxAllocationBase(BaseModel):
+    tax_kind: Optional[str] = "vat"
+    tax_code: Optional[str] = "standard"
+    tax_rate: float = 0
+    net_amount: float
+    tax_amount: float
+    gross_amount: float
+
+
+class PaymentTaxAllocationOut(PaymentTaxAllocationBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InvoicePaymentBase(BaseModel):
+    amount: float
+    paid_at: Optional[datetime] = None
+    reference: Optional[str] = None
+    method: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class InvoicePaymentCreate(InvoicePaymentBase):
+    tax_allocations: list[PaymentTaxAllocationBase] = []
+
+
+class InvoicePaymentOut(InvoicePaymentBase):
+    id: int
+    invoice_id: int
+    created_at: datetime
+    tax_allocations: list[PaymentTaxAllocationOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VatSummaryOut(BaseModel):
+    tax_kind: str = "vat"
+    accounting_method: str
+    period_start: Optional[datetime] = None
+    next_due: Optional[datetime] = None
+    output_vat: float
+    input_vat: float
+    credit_note_vat: float
+    refund_vat: float
+    payment_allocated_vat: float
+    net_vat_due: float
+
+
+class CorporationTaxSummaryOut(BaseModel):
+    tax_kind: str = "corporation_tax"
+    period_start: Optional[datetime] = None
+    next_payment_due: Optional[datetime] = None
+    next_return_due: Optional[datetime] = None
+    estimated_profit: float
+    estimated_tax_due: float
+    rate: float
 
 
 class EmailDraftRequest(BaseModel):
@@ -546,6 +669,24 @@ class AuthSetupRequest(BaseModel):
     bank_iban: str | None = None
     bank_swift: str | None = None
     bank_reference: str | None = None
+    vat_registered: bool | None = None
+    vat_number: str | None = None
+    vat_scheme: str | None = None
+    default_vat_rate: float | None = None
+    vat_inclusive_default: bool | None = None
+    vat_filing_frequency: str | None = None
+    vat_period_start_month: int | None = None
+    vat_period_start_day: int | None = None
+    vat_next_filing_due: datetime | None = None
+    vat_accounting_method: str | None = None
+    corporation_tax_enabled: bool | None = None
+    corporation_tax_reference: str | None = None
+    corporation_tax_rate: float | None = None
+    corporation_tax_period_start_month: int | None = None
+    corporation_tax_period_start_day: int | None = None
+    corporation_tax_payment_due: datetime | None = None
+    corporation_tax_return_due: datetime | None = None
+    other_taxes: list[dict] | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_username: str | None = None
@@ -640,6 +781,24 @@ class SettingsBase(BaseModel):
     bank_iban: Optional[str] = None
     bank_swift: Optional[str] = None
     bank_reference: Optional[str] = None
+    vat_registered: bool = False
+    vat_number: Optional[str] = None
+    vat_scheme: Optional[str] = None
+    default_vat_rate: float = 20
+    vat_inclusive_default: bool = False
+    vat_filing_frequency: Optional[str] = None
+    vat_period_start_month: int = 1
+    vat_period_start_day: int = 1
+    vat_next_filing_due: Optional[datetime] = None
+    vat_accounting_method: Optional[str] = None
+    corporation_tax_enabled: bool = False
+    corporation_tax_reference: Optional[str] = None
+    corporation_tax_rate: float = 25
+    corporation_tax_period_start_month: int = 1
+    corporation_tax_period_start_day: int = 1
+    corporation_tax_payment_due: Optional[datetime] = None
+    corporation_tax_return_due: Optional[datetime] = None
+    other_taxes: list[dict] = []
 
 
 class SettingsOut(SettingsBase):
@@ -682,3 +841,21 @@ class SettingsUpdate(BaseModel):
     bank_iban: str | None = None
     bank_swift: str | None = None
     bank_reference: str | None = None
+    vat_registered: bool | None = None
+    vat_number: str | None = None
+    vat_scheme: str | None = None
+    default_vat_rate: float | None = None
+    vat_inclusive_default: bool | None = None
+    vat_filing_frequency: str | None = None
+    vat_period_start_month: int | None = None
+    vat_period_start_day: int | None = None
+    vat_next_filing_due: datetime | None = None
+    vat_accounting_method: str | None = None
+    corporation_tax_enabled: bool | None = None
+    corporation_tax_reference: str | None = None
+    corporation_tax_rate: float | None = None
+    corporation_tax_period_start_month: int | None = None
+    corporation_tax_period_start_day: int | None = None
+    corporation_tax_payment_due: datetime | None = None
+    corporation_tax_return_due: datetime | None = None
+    other_taxes: list[dict] | None = None

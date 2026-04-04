@@ -1,57 +1,12 @@
 import {
   ArrowRight,
-  ClipboardList,
-  Coins,
   FileText,
-  ReceiptPoundSterling,
   ShieldCheck,
   Sparkles,
   WalletCards,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-
-function KpiCard({ eyebrow, title, value, detail, icon: Icon, tone = "slate", onClick }) {
-  const toneStyles = {
-    slate: "from-slate-100 via-white to-slate-50",
-    blue: "from-blue-100 via-white to-sky-50",
-    emerald: "from-emerald-100 via-white to-emerald-50",
-    amber: "from-amber-100 via-white to-amber-50",
-    rose: "from-rose-100 via-white to-rose-50",
-  };
-
-  return (
-    <Card className="group relative overflow-hidden border-0 bg-card/95 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-      <div className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-br ${toneStyles[tone]} opacity-70`} />
-      <CardContent className="relative space-y-5 p-6">
-        <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-            {eyebrow}
-          </p>
-          <div>
-            <p className="text-3xl font-semibold tracking-tight text-foreground">{value}</p>
-            <p className="mt-1 text-sm font-medium text-foreground">{title}</p>
-          </div>
-        </div>
-        <div className="flex items-end justify-between gap-4">
-          <p className="max-w-[16rem] text-sm leading-6 text-muted-foreground">{detail}</p>
-          {onClick ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 shrink-0 gap-1 px-2 text-muted-foreground"
-              onClick={onClick}
-            >
-              Open
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function SummaryStat({ label, value, tone = "default" }) {
   const toneClass =
@@ -62,21 +17,39 @@ function SummaryStat({ label, value, tone = "default" }) {
         : "text-foreground";
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50/90 px-4 py-3.5">
+    <div className="flex min-w-0 flex-col gap-1 rounded-2xl bg-slate-50/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={`text-sm font-semibold ${toneClass}`}>{value}</span>
+      <span className={`text-sm font-semibold leading-tight ${toneClass}`}>{value}</span>
     </div>
   );
 }
 
-function MetricTile({ label, value, description }) {
+function SummaryActionStat({ label, value, onClick }) {
   return (
-    <div className="rounded-3xl bg-white/88 p-5">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between rounded-2xl bg-slate-50/90 px-4 py-3 text-left transition-colors hover:bg-slate-100/90"
+    >
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        {value}
+        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+      </span>
+    </button>
+  );
+}
+
+function MetricTile({ label, value, description, className = "" }) {
+  return (
+    <div className={`min-w-0 rounded-3xl bg-white/88 p-4 ${className}`}>
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
         {label}
       </p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+      <p className="mt-2.5 break-words text-[clamp(1.5rem,1.8vw,1.95rem)] font-semibold leading-tight tracking-tight text-foreground">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-5 text-muted-foreground">{description}</p>
     </div>
   );
 }
@@ -165,7 +138,6 @@ export default function DashboardPage({
   ).padStart(2, "0")} - ${String(settings?.fy_end_day || 31).padStart(2, "0")}/${String(
     settings?.fy_end_month || 12
   ).padStart(2, "0")}`;
-  const totalQuoted = Number(financialTotals?.totalQuoted || 0);
   const totalInvoiced = Number(financialTotals?.totalInvoiced || 0);
   const totalPaid = Number(financialTotals?.totalPaid || 0);
   const totalCredited = Number(financialTotals?.totalCredited || 0);
@@ -176,29 +148,29 @@ export default function DashboardPage({
   const grossDelta = grossBilling - totalPaid;
 
   return (
-    <section className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[1.7fr_0.85fr]">
+    <section className="space-y-5">
+      <div className="space-y-6">
         <Card className="overflow-hidden rounded-[28px] border-border/60 bg-[linear-gradient(135deg,rgba(15,23,42,0.04),rgba(255,255,255,0.96),rgba(14,165,233,0.06))] shadow-sm">
-          <CardContent className="p-6 lg:p-8">
-            <div className="grid gap-6 lg:grid-cols-[1.35fr_0.95fr]">
-              <div className="space-y-6">
+          <CardContent className="p-5 lg:p-6">
+          <div className="space-y-5">
+            <div className="space-y-6">
                 <div className="space-y-4">
                   <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-600 shadow-sm">
                     <Sparkles className="h-3.5 w-3.5" />
                     Client Management App
                   </div>
-                  <div className="space-y-3">
-                    <h2 className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+                  <div className="space-y-2.5">
+                    <h2 className="whitespace-nowrap text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
                       Clean financial control, live workload visibility, and less dashboard noise.
                     </h2>
-                    <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+                    <p className="whitespace-nowrap text-sm leading-7 text-muted-foreground sm:text-base">
                       {yearLabel}. Track net invoicing, credits, refunds, and the active delivery
                       portfolio from one operational view.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <MetricTile
                     label="Net paid"
                     value={formatGBP(totalPaid)}
@@ -213,15 +185,16 @@ export default function DashboardPage({
                     label="Financial year"
                     value={fyRange}
                     description="Active reporting window used across the workspace."
+                    className="sm:col-span-2 xl:col-span-1"
                   />
                 </div>
               </div>
 
-              <div className="rounded-[28px] bg-white/90 py-6 backdrop-blur lg:p-7">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                    Financial posture
-                  </p>
+            <div className="rounded-[28px] bg-white/90 p-5 backdrop-blur lg:p-6">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                  Financial posture
+                </p>
                   <h3 className="text-2xl font-semibold tracking-tight text-foreground">
                     Gross to net position
                   </h3>
@@ -231,9 +204,9 @@ export default function DashboardPage({
                   </p>
                 </div>
 
-                <div className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+              <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
                   <div className="space-y-4 rounded-3xl bg-slate-50/90 p-5">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 lg:grid-cols-2">
                       <SummaryStat label="Gross billing" value={formatGBP(grossBilling)} />
                       <SummaryStat label="Net collected" value={formatGBP(totalPaid)} tone="positive" />
                       <SummaryStat label="Invoice base" value={formatGBP(totalInvoiced)} />
@@ -291,7 +264,7 @@ export default function DashboardPage({
           </CardContent>
         </Card>
 
-        <Card className="rounded-[28px] border-border/60 bg-card/95 shadow-sm">
+      <Card className="w-full rounded-[28px] border-border/60 bg-card/95 shadow-sm">
           <CardHeader className="px-6 pb-2 pt-6">
             <CardDescription className="text-xs font-semibold uppercase tracking-[0.22em]">
               Operations
@@ -314,81 +287,24 @@ export default function DashboardPage({
             </div>
 
             <div className="space-y-3">
-              <SummaryStat label="Clients" value={String(filteredClients.length)} />
-              <SummaryStat label="Proposals" value={String(filteredProposals.length)} />
-              <SummaryStat label="Service agreements" value={String(filteredAgreements.length)} />
-            </div>
-
-            <div className="grid gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 justify-between rounded-xl bg-white"
+              <SummaryActionStat
+                label="Clients"
+                value={String(filteredClients.length)}
                 onClick={() => onNavigate("clients")}
-              >
-                Open clients
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 justify-between rounded-xl bg-white"
+              />
+              <SummaryActionStat
+                label="Proposals"
+                value={String(filteredProposals.length)}
                 onClick={() => onNavigate("proposals")}
-              >
-                Open proposals
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 justify-between rounded-xl bg-white"
+              />
+              <SummaryActionStat
+                label="Service agreements"
+                value={String(filteredAgreements.length)}
                 onClick={() => onNavigate("agreements")}
-              >
-                Open agreements
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+              />
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          eyebrow="Pipeline"
-          title="Quoted pipeline"
-          value={formatGBP(totalQuoted)}
-          detail="Outstanding quote value available to convert into revenue."
-          icon={ClipboardList}
-          tone="blue"
-          onClick={() => onNavigate("quotes")}
-        />
-        <KpiCard
-          eyebrow="Billing"
-          title="Net invoiced"
-          value={formatGBP(totalInvoiced)}
-          detail="Issued invoices after credit note adjustments."
-          icon={ReceiptPoundSterling}
-          tone="slate"
-          onClick={() => onNavigate("invoices")}
-        />
-        <KpiCard
-          eyebrow="Cash"
-          title="Net paid"
-          value={formatGBP(totalPaid)}
-          detail="Paid invoice value retained after refunds."
-          icon={WalletCards}
-          tone="emerald"
-          onClick={() => onNavigate("adjustments")}
-        />
-        <KpiCard
-          eyebrow="Adjustments"
-          title="Credit and refund activity"
-          value={formatGBP(totalCredited + totalRefunded)}
-          detail="Combined revenue adjustments requiring active oversight."
-          icon={Coins}
-          tone="amber"
-          onClick={() => onNavigate("adjustments")}
-        />
       </div>
 
       <Card className="rounded-[28px] border-border/60 bg-card/95 shadow-sm">

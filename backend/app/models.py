@@ -53,6 +53,13 @@ class Invoice(Base):
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(50), default="draft")
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     due_date: Mapped[datetime | None] = mapped_column(DateTime)
@@ -67,6 +74,9 @@ class Invoice(Base):
     credit_notes: Mapped[list["CreditNote"]] = relationship(
         "CreditNote", back_populates="invoice", cascade="all, delete-orphan"
     )
+    payments: Mapped[list["InvoicePayment"]] = relationship(
+        "InvoicePayment", back_populates="invoice", cascade="all, delete-orphan"
+    )
 
 
 class Quote(Base):
@@ -80,6 +90,13 @@ class Quote(Base):
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(50), default="draft")
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime)
@@ -107,6 +124,13 @@ class InvoiceLineItem(Base):
     description: Mapped[str] = mapped_column(String(300), nullable=False)
     quantity: Mapped[float] = mapped_column(Numeric(10, 2), default=1)
     unit_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="line_items")
     credit_note_line_items: Mapped[list["CreditNoteLineItem"]] = relationship(
@@ -127,6 +151,9 @@ class CreditNote(Base):
     )
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     notes: Mapped[str | None] = mapped_column(Text())
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -153,6 +180,13 @@ class CreditNoteLineItem(Base):
     description: Mapped[str] = mapped_column(String(300), nullable=False)
     source_unit_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     credited_quantity: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
     credited_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
 
     credit_note: Mapped["CreditNote"] = relationship("CreditNote", back_populates="line_items")
@@ -176,6 +210,9 @@ class Refund(Base):
         ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
     )
     refunded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -195,6 +232,13 @@ class QuoteLineItem(Base):
     description: Mapped[str] = mapped_column(String(300), nullable=False)
     quantity: Mapped[float] = mapped_column(Numeric(10, 2), default=1)
     unit_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
 
     quote: Mapped["Quote"] = relationship("Quote", back_populates="line_items")
 
@@ -488,6 +532,14 @@ class Expense(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
+    vat_reclaimable: Mapped[bool] = mapped_column(Boolean, default=False)
     incurred_date: Mapped[datetime | None] = mapped_column(DateTime)
     notes: Mapped[str | None] = mapped_column(Text())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -510,6 +562,43 @@ class ExpenseReceipt(Base):
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
     expense: Mapped["Expense"] = relationship("Expense", back_populates="receipts")
+
+
+class InvoicePayment(Base):
+    __tablename__ = "invoice_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reference: Mapped[str | None] = mapped_column(String(200))
+    method: Mapped[str | None] = mapped_column(String(100))
+    notes: Mapped[str | None] = mapped_column(Text())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="payments")
+    tax_allocations: Mapped[list["PaymentTaxAllocation"]] = relationship(
+        "PaymentTaxAllocation", back_populates="payment", cascade="all, delete-orphan"
+    )
+
+
+class PaymentTaxAllocation(Base):
+    __tablename__ = "payment_tax_allocations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    payment_id: Mapped[int] = mapped_column(
+        ForeignKey("invoice_payments.id", ondelete="CASCADE"), nullable=False
+    )
+    tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
+    tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    net_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    gross_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+
+    payment: Mapped["InvoicePayment"] = relationship("InvoicePayment", back_populates="tax_allocations")
 
 
 class Settings(Base):
@@ -554,6 +643,24 @@ class Settings(Base):
     bank_iban: Mapped[str | None] = mapped_column(String(100))
     bank_swift: Mapped[str | None] = mapped_column(String(100))
     bank_reference: Mapped[str | None] = mapped_column(String(200))
+    vat_registered: Mapped[bool] = mapped_column(Boolean, default=False)
+    vat_number: Mapped[str | None] = mapped_column(String(100))
+    vat_scheme: Mapped[str | None] = mapped_column(String(50), default="standard")
+    default_vat_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=20)
+    vat_inclusive_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    vat_filing_frequency: Mapped[str | None] = mapped_column(String(50), default="quarterly")
+    vat_period_start_month: Mapped[int] = mapped_column(Integer, default=1)
+    vat_period_start_day: Mapped[int] = mapped_column(Integer, default=1)
+    vat_next_filing_due: Mapped[datetime | None] = mapped_column(DateTime)
+    vat_accounting_method: Mapped[str | None] = mapped_column(String(50), default="accrual")
+    corporation_tax_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    corporation_tax_reference: Mapped[str | None] = mapped_column(String(100))
+    corporation_tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=25)
+    corporation_tax_period_start_month: Mapped[int] = mapped_column(Integer, default=1)
+    corporation_tax_period_start_day: Mapped[int] = mapped_column(Integer, default=1)
+    corporation_tax_payment_due: Mapped[datetime | None] = mapped_column(DateTime)
+    corporation_tax_return_due: Mapped[datetime | None] = mapped_column(DateTime)
+    other_taxes: Mapped[list[dict] | None] = mapped_column(JSON, default=list)
 
 
 class User(Base):
