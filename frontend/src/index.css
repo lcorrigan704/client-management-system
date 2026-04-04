@@ -99,38 +99,70 @@
 
 ::view-transition-old(app-view),
 ::view-transition-new(app-view) {
-  animation-duration: 220ms;
+  animation-duration: 240ms;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-::view-transition-old(app-view) {
-  animation-name: app-view-fade-out;
-}
-
-::view-transition-new(app-view) {
-  animation-name: app-view-fade-in;
-}
-
-@keyframes app-view-fade-out {
+@keyframes app-view-slide-out-left {
   from {
     opacity: 1;
     transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateX(-18px);
   }
 }
 
-@keyframes app-view-fade-in {
+@keyframes app-view-slide-in-right {
   from {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateX(18px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(0);
   }
+}
+
+@keyframes app-view-slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+
+@keyframes app-view-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+:root[data-nav-direction="back"]::view-transition-old(app-view) {
+  animation-name: app-view-slide-out-right;
+}
+
+:root[data-nav-direction="back"]::view-transition-new(app-view) {
+  animation-name: app-view-slide-in-left;
+}
+
+:root[data-nav-direction="forward"]::view-transition-old(app-view),
+:root:not([data-nav-direction])::view-transition-old(app-view) {
+  animation-name: app-view-slide-out-left;
+}
+
+:root[data-nav-direction="forward"]::view-transition-new(app-view),
+:root:not([data-nav-direction])::view-transition-new(app-view) {
+  animation-name: app-view-slide-in-right;
 }
 
 @media (prefers-reduced-motion: reduce) {

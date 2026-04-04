@@ -29,7 +29,8 @@ function SummaryActionStat({ label, value, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-between rounded-2xl bg-slate-50/90 px-4 py-3 text-left transition-colors hover:bg-slate-100/90"
+      aria-label={`Open ${label.toLowerCase()}`}
+      className="flex w-full items-center justify-between rounded-2xl bg-slate-50/90 px-4 py-3 text-left transition-colors hover:bg-slate-100/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
@@ -54,11 +55,13 @@ function MetricTile({ label, value, description, className = "" }) {
   );
 }
 
-function ReminderItem({ icon: Icon, label, value }) {
+function ReminderItem({ icon, label, value }) {
+  const IconComponent = icon;
+
   return (
     <div className="flex items-start gap-3 rounded-2xl bg-slate-50/85 px-4 py-4">
       <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-        <Icon className="h-4 w-4" />
+        <IconComponent className="h-4 w-4" />
       </div>
       <div className="space-y-1">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -160,10 +163,10 @@ export default function DashboardPage({
                     Client Management App
                   </div>
                   <div className="space-y-2.5">
-                    <h2 className="whitespace-nowrap text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
+                    <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
                       Clean financial control, live workload visibility, and less dashboard noise.
                     </h2>
-                    <p className="whitespace-nowrap text-sm leading-7 text-muted-foreground sm:text-base">
+                    <p className="text-pretty text-sm leading-7 text-muted-foreground sm:text-base">
                       {yearLabel}. Track net invoicing, credits, refunds, and the active delivery
                       portfolio from one operational view.
                     </p>
