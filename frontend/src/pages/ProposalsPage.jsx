@@ -40,6 +40,7 @@ export default function ProposalsPage({
   handleProposalUpload,
   onBulkDelete,
   onBulkSendReminder,
+  onBulkCompose,
   onReload,
   currentUserEmail,
 }) {
@@ -382,6 +383,11 @@ export default function ProposalsPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Compose from selected",
+                variant: "outline",
+                onClick: (rows) => onBulkCompose?.(rows),
+              },
               {
                 label: "Send reminders",
                 variant: "outline",

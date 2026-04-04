@@ -116,7 +116,12 @@ const emptyEmailDraft = {
   entity_type: "invoice",
   entity_id: "",
   client_id: "",
+  selected_items: [],
   to_email: "",
+  to_email_overrides: {},
+  subject_overrides: {},
+  body_overrides: {},
+  include_proposal_assets: true,
   send: false,
 };
 

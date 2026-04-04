@@ -30,6 +30,7 @@ export default function AgreementsPage({
   resetAgreementForm,
   handleAgreementSubmit,
   onBulkDelete,
+  onBulkCompose,
   onReload,
   currentUserEmail,
 }) {
@@ -118,6 +119,33 @@ export default function AgreementsPage({
     },
   };
 
+  function normalizeAgreement(form) {
+    return {
+      client_id: form.client_id || "",
+      display_id: (form.display_id || "").trim(),
+      quote_id: form.quote_id || "",
+      title: (form.title || "").trim(),
+      start_date: form.start_date ? form.start_date.toISOString() : null,
+      end_date: form.end_date ? form.end_date.toISOString() : null,
+      scope_of_services: (form.scope_of_services || "").trim(),
+      duration: (form.duration || "").trim(),
+      availability: (form.availability || "").trim(),
+      meetings: (form.meetings || "").trim(),
+      access_requirements: (form.access_requirements || "").trim(),
+      fees_payments: (form.fees_payments || "").trim(),
+      data_protection: (form.data_protection || "").trim(),
+      termination: (form.termination || "").trim(),
+      company_signatory_name: (form.company_signatory_name || "").trim(),
+      company_signatory_title: (form.company_signatory_title || "").trim(),
+      company_signed_date: form.company_signed_date ? form.company_signed_date.toISOString() : null,
+      client_signatory_name: (form.client_signatory_name || "").trim(),
+      sla_items: (form.sla_items || []).map((item) => ({
+        sla: (item.sla || "").trim(),
+        timescale: (item.timescale || "").trim(),
+      })),
+    };
+  }
+
   useEffect(() => {
     if (agreementDialogOpen) {
       setStepIndex(0);
@@ -179,31 +207,6 @@ export default function AgreementsPage({
       toast.error(error.message || "Unable to prefetch comments.");
     }
   };
-
-  const normalizeAgreement = (form) => ({
-    client_id: form.client_id || "",
-    display_id: (form.display_id || "").trim(),
-    quote_id: form.quote_id || "",
-    title: (form.title || "").trim(),
-    start_date: form.start_date ? form.start_date.toISOString() : null,
-    end_date: form.end_date ? form.end_date.toISOString() : null,
-    scope_of_services: (form.scope_of_services || "").trim(),
-    duration: (form.duration || "").trim(),
-    availability: (form.availability || "").trim(),
-    meetings: (form.meetings || "").trim(),
-    access_requirements: (form.access_requirements || "").trim(),
-    fees_payments: (form.fees_payments || "").trim(),
-    data_protection: (form.data_protection || "").trim(),
-    termination: (form.termination || "").trim(),
-    company_signatory_name: (form.company_signatory_name || "").trim(),
-    company_signatory_title: (form.company_signatory_title || "").trim(),
-    company_signed_date: form.company_signed_date ? form.company_signed_date.toISOString() : null,
-    client_signatory_name: (form.client_signatory_name || "").trim(),
-    sla_items: (form.sla_items || []).map((item) => ({
-      sla: (item.sla || "").trim(),
-      timescale: (item.timescale || "").trim(),
-    })),
-  });
 
   const isAgreementDirty = () => {
     if (!editingAgreementId || !initialSnapshot) return true;
@@ -360,6 +363,11 @@ export default function AgreementsPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Compose from selected",
+                variant: "outline",
+                onClick: (rows) => onBulkCompose?.(rows),
+              },
               {
                 label: "Delete selected",
                 variant: "destructive",

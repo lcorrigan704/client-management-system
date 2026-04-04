@@ -33,6 +33,7 @@ export default function ExpensesPage({
   handleExpenseSubmit,
   handleExpenseUpload,
   onBulkDelete,
+  onBulkCompose,
 }) {
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const userMap = new Map(users.map((person) => [person.id, person]));
@@ -160,6 +161,11 @@ export default function ExpensesPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Compose from selected",
+                variant: "outline",
+                onClick: (rows) => onBulkCompose?.(rows),
+              },
               {
                 label: "Delete selected",
                 variant: "destructive",

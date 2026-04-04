@@ -22,7 +22,6 @@ import useAuth from "@/hooks/useAuth";
 import useSettings from "@/hooks/useSettings";
 import useEmailDraft from "@/hooks/useEmailDraft";
 import useYearFilter from "@/hooks/useYearFilter";
-import useEmailEntities from "@/hooks/useEmailEntities";
 import { getClientColumns } from "@/columns/clients.jsx";
 import { getInvoiceColumns } from "@/columns/invoices.jsx";
 import { getQuoteColumns } from "@/columns/quotes.jsx";
@@ -152,9 +151,13 @@ export default function App() {
     emailForm,
     setEmailForm,
     emailResponse,
+    setEmailResponse,
     emailDialogOpen,
     setEmailDialogOpen,
     handleEmailDraftSubmit,
+    submitCompose,
+    sendGroupViaSmtp,
+    composeState,
     handleCopyEmail,
     buildMailto,
   } = useEmailDraft({
@@ -162,7 +165,6 @@ export default function App() {
     onCopySuccess: handleEmailCopySuccess,
     onCopyError: handleEmailCopyError,
     onSendSuccess: handleEmailSendSuccess,
-    isActive: view === VIEWS.EMAILS,
   });
 
   const { updateSettings, saveSettings } = useSettings({
@@ -905,33 +907,60 @@ export default function App() {
   };
 
   const openEmailForEntity = (entityType, entityId, sendNow = false) => {
+    const normalizedType = String(entityType || "").toLowerCase();
     const idNum = Number(entityId);
-    let clientId = "";
-    if (entityType === "invoice") {
-      const invoice = invoices.find((item) => item.id === idNum);
-      clientId = invoice ? String(invoice.client_id) : "";
-    } else if (entityType === "quote") {
-      const quote = quotes.find((item) => item.id === idNum);
-      clientId = quote ? String(quote.client_id) : "";
-    } else if (entityType === "proposal") {
-      const proposal = proposals.find((item) => item.id === idNum);
-      clientId = proposal ? String(proposal.client_id) : "";
-    } else if (entityType === "agreement") {
-      const agreement = agreements.find((item) => item.id === idNum);
-      clientId = agreement ? String(agreement.client_id) : "";
-    }
     navigateTo(VIEWS.EMAILS);
-    const toEmail = getEntityEmail(entityType, entityId);
+    const toEmail = getEntityEmail(normalizedType, entityId);
     setEmailForm((prev) => ({
       ...prev,
-      entity_type: entityType,
-      entity_id: String(entityId),
-      client_id: clientId,
+      selected_items: [
+        ...(prev.selected_items || []).filter(
+          (item) =>
+            !(
+              item.entity_type === normalizedType &&
+              String(item.entity_id) === String(idNum)
+            )
+        ),
+        { entity_type: normalizedType, entity_id: idNum },
+      ],
+      entity_type: normalizedType,
+      entity_id: String(idNum),
       send: sendNow,
-      to_email: toEmail || "",
+      to_email: "",
+      to_email_overrides: {},
+      subject_overrides: {},
+      body_overrides: {},
+      include_proposal_assets: true,
     }));
+    if (!toEmail) {
+      setEmailDialogOpen(true);
+      return;
+    }
     setEmailDialogOpen(true);
   };
+
+  const openComposeForRows = useCallback(
+    (entityType, rows) => {
+      if (!rows?.length) return;
+      navigateTo(VIEWS.EMAILS);
+      const items = rows.map((row) => ({
+        entity_type: entityType,
+        entity_id: row.id,
+      }));
+      setEmailForm((prev) => ({
+        ...prev,
+        selected_items: items,
+        send: false,
+        to_email: "",
+        to_email_overrides: {},
+        subject_overrides: {},
+        body_overrides: {},
+        include_proposal_assets: true,
+      }));
+      setEmailDialogOpen(true);
+    },
+    [navigateTo, setEmailForm]
+  );
 
   const openCreditNoteForInvoice = useCallback(
     (invoice) => {
@@ -1223,8 +1252,6 @@ export default function App() {
     filteredClients,
     filteredInvoices,
     filteredQuotes,
-    filteredCreditNotes,
-    filteredRefunds,
     filteredAgreements,
     filteredProposals,
     filteredExpenses,
@@ -1242,17 +1269,35 @@ export default function App() {
     settings,
   });
 
-  const emailEntityOptions = useEmailEntities({
-    entityType: emailForm.entity_type,
-    clientId: emailForm.client_id,
+  const composeEntities = useMemo(() => {
+    const toEntry = (entityType, item) => {
+      const client = item.client_id ? clientMap.get(item.client_id) : null;
+      const labelId = item.display_id || `${entityType.toUpperCase()}-${item.id}`;
+      const title = item.title || "";
+      return {
+        entity_type: entityType,
+        entity_id: item.id,
+        client_id: item.client_id || "unassigned",
+        client_label: client?.company || client?.name || "Unassigned",
+        label: `${labelId}${title ? ` · ${title}` : ""}`,
+        status: item.status || "",
+      };
+    };
+    return [
+      ...filteredInvoices.map((item) => toEntry("invoice", item)),
+      ...filteredQuotes.map((item) => toEntry("quote", item)),
+      ...filteredProposals.map((item) => toEntry("proposal", item)),
+      ...filteredAgreements.map((item) => toEntry("agreement", item)),
+      ...filteredExpenses.map((item) => toEntry("expense", item)),
+    ];
+  }, [
     clientMap,
-    filteredInvoices,
-    filteredQuotes,
-    filteredCreditNotes,
-    filteredRefunds,
     filteredAgreements,
+    filteredExpenses,
+    filteredInvoices,
     filteredProposals,
-  });
+    filteredQuotes,
+  ]);
 
   const clientColumns = useMemo(
     () =>
@@ -1586,10 +1631,10 @@ export default function App() {
             editingInvoiceId={editingInvoiceId}
             resetInvoiceForm={resetInvoiceForm}
             handleInvoiceSubmit={handleInvoiceSubmit}
-            handleMarkInvoicePaid={handleMarkInvoicePaid}
             onBulkMarkPaid={handleBulkMarkInvoicesPaid}
             onBulkDelete={handleBulkDeleteInvoices}
             onBulkSendReminder={handleBulkSendInvoiceReminders}
+            onBulkCompose={(rows) => openComposeForRows("invoice", rows)}
             emptyInvoice={emptyInvoice}
           />
         )}
@@ -1607,6 +1652,7 @@ export default function App() {
             handleQuoteSubmit={handleQuoteSubmit}
             onBulkDelete={handleBulkDeleteQuotes}
             onBulkSendReminder={handleBulkSendQuoteReminders}
+            onBulkCompose={(rows) => openComposeForRows("quote", rows)}
             emptyQuote={emptyQuote}
           />
         )}
@@ -1654,6 +1700,7 @@ export default function App() {
             resetAgreementForm={resetAgreementForm}
             handleAgreementSubmit={handleAgreementSubmit}
             onBulkDelete={handleBulkDeleteAgreements}
+            onBulkCompose={(rows) => openComposeForRows("agreement", rows)}
             onReload={loadAll}
             currentUserEmail={user?.email}
           />
@@ -1674,6 +1721,7 @@ export default function App() {
             handleProposalUpload={handleProposalUpload}
             onBulkDelete={handleBulkDeleteProposals}
             onBulkSendReminder={handleBulkSendProposalReminders}
+            onBulkCompose={(rows) => openComposeForRows("proposal", rows)}
             onReload={loadAll}
             currentUserEmail={user?.email}
           />
@@ -1693,19 +1741,24 @@ export default function App() {
             handleExpenseSubmit={handleExpenseSubmit}
             handleExpenseUpload={handleExpenseUpload}
             onBulkDelete={handleBulkDeleteExpenses}
+            onBulkCompose={(rows) => openComposeForRows("expense", rows)}
           />
         )}
         {view === VIEWS.EMAILS && (
           <EmailsPage
             emailResponse={emailResponse}
+            setEmailResponse={setEmailResponse}
             emailDialogOpen={emailDialogOpen}
             setEmailDialogOpen={setEmailDialogOpen}
             emailForm={emailForm}
             setEmailForm={setEmailForm}
             handleEmailDraftSubmit={handleEmailDraftSubmit}
+            submitCompose={submitCompose}
+            sendGroupViaSmtp={sendGroupViaSmtp}
+            composeState={composeState}
             handleCopyEmail={handleCopyEmail}
             buildMailto={buildMailto}
-            emailEntityOptions={emailEntityOptions}
+            composeEntities={composeEntities}
             clients={clients}
           />
         )}

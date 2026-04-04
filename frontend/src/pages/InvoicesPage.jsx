@@ -23,10 +23,10 @@ export default function InvoicesPage({
   editingInvoiceId,
   resetInvoiceForm,
   handleInvoiceSubmit,
-  handleMarkInvoicePaid,
   onBulkMarkPaid,
   onBulkDelete,
   onBulkSendReminder,
+  onBulkCompose,
   emptyInvoice,
 }) {
   const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
@@ -142,6 +142,11 @@ export default function InvoicesPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Compose from selected",
+                variant: "outline",
+                onClick: (rows) => onBulkCompose?.(rows),
+              },
               {
                 label: "Mark as paid",
                 variant: "outline",
