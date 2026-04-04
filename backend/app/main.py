@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+import mimetypes
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,13 +10,14 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 
 from . import crud, models, schemas
 from .auth import clear_session, create_session, get_current_user, require_role, require_user
 from .config import settings
 from .db import Base, engine, get_db, SessionLocal
 from .email_utils import generate_email_draft, send_email_smtp, test_smtp_connection
-from base64 import b64encode
+from base64 import b64encode, b64decode
 from .security import password_meets_policy, verify_password
 
 
@@ -1340,8 +1343,11 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/email/draft", response_model=schemas.EmailDraftResponse)
-
-def create_email_draft(payload: schemas.EmailDraftRequest, db: Session = Depends(get_db)):
+def create_email_draft(
+    payload: schemas.EmailDraftRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     entity_type = payload.entity_type.lower()
     entity = None
     client = None
@@ -1387,6 +1393,24 @@ def create_email_draft(payload: schemas.EmailDraftRequest, db: Session = Depends
                 }
             )
         sent, message = send_email_smtp(payload.to_email, subject, body, attachments=attachments)
+        status_value = "sent" if sent else "failed"
+        _create_email_log(
+            db,
+            group_id=f"draft-{entity_type}-{entity.id}",
+            client_id=getattr(client, "id", None),
+            client_label=(client.company or client.name) if client else "Unassigned",
+            to_email=payload.to_email,
+            subject=subject,
+            body=body,
+            status=status_value,
+            source="draft",
+            entity_refs=[{"entity_type": entity_type, "entity_id": entity.id}],
+            attachment_count=len(attachments),
+            send_message=message,
+            error_message=message if not sent else None,
+            sent_at=datetime.utcnow() if sent else None,
+            created_by_user_id=user.id,
+        )
         if sent:
             if entity_type == "invoice" and entity.status != "paid":
                 entity.status = "sent"
@@ -1397,6 +1421,10 @@ def create_email_draft(payload: schemas.EmailDraftRequest, db: Session = Depends
             elif entity_type == "proposal" and entity.status == "draft":
                 entity.status = "sent"
                 db.commit()
+            else:
+                db.commit()
+        else:
+            db.commit()
     else:
         sent, message = False, "Draft generated."
 
@@ -1408,3 +1436,477 @@ def create_email_draft(payload: schemas.EmailDraftRequest, db: Session = Depends
         pdf_base64=b64encode(pdf_bytes).decode("utf-8") if pdf_bytes else None,
         pdf_filename=pdf_filename,
     )
+
+
+def _resolve_email_entity(db: Session, entity_type: str, entity_id: int):
+    entity_type = (entity_type or "").lower().strip()
+    entity = None
+    client = None
+
+    if entity_type == "invoice":
+        entity = db.query(models.Invoice).filter(models.Invoice.id == entity_id).first()
+    elif entity_type == "quote":
+        entity = db.query(models.Quote).filter(models.Quote.id == entity_id).first()
+    elif entity_type == "proposal":
+        entity = db.query(models.Proposal).filter(models.Proposal.id == entity_id).first()
+    elif entity_type == "agreement":
+        entity = db.query(models.ServiceAgreement).filter(models.ServiceAgreement.id == entity_id).first()
+    elif entity_type == "expense":
+        entity = db.query(models.Expense).filter(models.Expense.id == entity_id).first()
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported entity type: {entity_type}")
+
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"{entity_type.title()} {entity_id} not found")
+
+    client = getattr(entity, "client", None)
+    return entity_type, entity, client
+
+
+def _entity_display_id(entity_type: str, entity):
+    prefixes = {
+        "invoice": "INV",
+        "quote": "QUOTE",
+        "proposal": "PROP",
+        "agreement": "AGR",
+        "expense": "EXP",
+    }
+    return getattr(entity, "display_id", None) or f"{prefixes.get(entity_type, 'DOC')}-{entity.id}"
+
+
+def _load_upload_attachment(file_path: str):
+    if not file_path:
+        return None
+    relative = file_path.replace("\\", "/").lstrip("/")
+    if relative.startswith("uploads/"):
+        relative = relative[len("uploads/"):]
+    candidate = (UPLOADS_DIR / relative).resolve()
+    try:
+        candidate.relative_to(UPLOADS_DIR.resolve())
+    except ValueError:
+        return None
+    if not candidate.exists() or not candidate.is_file():
+        return None
+    return candidate.read_bytes()
+
+
+def _next_unique_filename(filename: str, used_names: set[str]):
+    base_name = (filename or "attachment.pdf").strip() or "attachment.pdf"
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    candidate = base_name
+    index = 2
+    while candidate.lower() in used_names:
+        candidate = f"{stem}-{index}{suffix}"
+        index += 1
+    used_names.add(candidate.lower())
+    return candidate
+
+
+def _default_to_email_for_client(client):
+    if not client:
+        return None
+    return client.invoice_email or client.contact_email or client.email
+
+
+def _create_email_log(
+    db: Session,
+    *,
+    group_id: str,
+    client_id: int | None,
+    client_label: str,
+    to_email: str | None,
+    subject: str,
+    body: str,
+    status: str,
+    source: str,
+    entity_refs: list[dict],
+    attachment_count: int,
+    send_message: str | None = None,
+    provider_message_id: str | None = None,
+    error_message: str | None = None,
+    sent_at: datetime | None = None,
+    delivered_at: datetime | None = None,
+    created_by_user_id: int | None = None,
+):
+    if not _email_logs_enabled(db):
+        return None
+    log_row = models.EmailLog(
+        group_id=group_id,
+        client_id=client_id,
+        client_label=client_label,
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        status=status,
+        source=source,
+        entity_refs=entity_refs,
+        attachment_count=attachment_count,
+        send_message=send_message,
+        provider_message_id=provider_message_id,
+        error_message=error_message,
+        sent_at=sent_at,
+        delivered_at=delivered_at,
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(log_row)
+    db.flush()
+    return log_row
+
+
+def _email_logs_enabled(db: Session) -> bool:
+    bind = db.get_bind()
+    if not bind:
+        return False
+    try:
+        return inspect(bind).has_table("email_logs")
+    except Exception:
+        return False
+
+
+@app.post("/email/compose", response_model=schemas.EmailComposeResponse)
+def compose_email(
+    payload: schemas.EmailComposeRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    settings_row = crud.get_or_create_settings(db)
+    company_name = settings_row.company_name or "Your Company"
+
+    deduped_items = []
+    seen = set()
+    for item in payload.items:
+        key = (item.entity_type.lower().strip(), int(item.entity_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_items.append(key)
+
+    grouped = defaultdict(list)
+    for entity_type, entity_id in deduped_items:
+        resolved_type, entity, client = _resolve_email_entity(db, entity_type, entity_id)
+        group_key = str(client.id) if client else "unassigned"
+        grouped[group_key].append((resolved_type, entity, client))
+
+    groups_out: list[schemas.EmailComposeGroup] = []
+    sent_groups = 0
+    failed_groups = 0
+    total_attachments = 0
+
+    for group_key, group_items in grouped.items():
+        client = group_items[0][2] if group_items else None
+        client_id = client.id if client else None
+        client_label = (
+            (client.company or client.name) if client else "Unassigned expenses"
+        )
+        to_default = _default_to_email_for_client(client)
+        to_override = payload.to_email_overrides.get(group_key)
+        to_email = to_override if to_override is not None else to_default
+
+        entities_out: list[schemas.EmailComposeEntityOut] = []
+        attachments_out: list[schemas.EmailComposeAttachment] = []
+        used_filenames: set[str] = set()
+        warnings: list[str] = []
+        item_lines: list[str] = []
+        first_subject = ""
+
+        for entity_type, entity, item_client in group_items:
+            subject, _body, pdf_bytes, pdf_filename = generate_email_draft(entity_type, item_client, entity)
+            if not first_subject:
+                first_subject = subject
+
+            display_id = _entity_display_id(entity_type, entity)
+            entities_out.append(
+                schemas.EmailComposeEntityOut(
+                    entity_type=entity_type,
+                    entity_id=entity.id,
+                    display_id=display_id,
+                    title=getattr(entity, "title", None),
+                )
+            )
+            item_lines.append(f"- {display_id} ({entity_type.title()})")
+
+            if pdf_bytes:
+                filename = _next_unique_filename(pdf_filename or f"{display_id}.pdf", used_filenames)
+                attachments_out.append(
+                    schemas.EmailComposeAttachment(
+                        filename=filename,
+                        entity_type=entity_type,
+                        entity_id=entity.id,
+                        source="generated_pdf",
+                        content_base64=b64encode(pdf_bytes).decode("utf-8"),
+                    )
+                )
+
+            if payload.include_proposal_assets and entity_type == "proposal":
+                for attachment in getattr(entity, "attachments", []) or []:
+                    if isinstance(attachment, dict):
+                        file_path = attachment.get("file_path") or ""
+                        attachment_filename = attachment.get("filename")
+                    else:
+                        file_path = getattr(attachment, "file_path", "") or ""
+                        attachment_filename = getattr(attachment, "filename", None)
+                    raw = _load_upload_attachment(file_path)
+                    if raw is None:
+                        warnings.append(
+                            f"Could not load proposal attachment: {attachment_filename or file_path}"
+                        )
+                        continue
+                    candidate_name = (
+                        attachment_filename
+                        or file_path.split("/")[-1]
+                        or f"{display_id}-attachment"
+                    )
+                    filename = _next_unique_filename(candidate_name, used_filenames)
+                    attachments_out.append(
+                        schemas.EmailComposeAttachment(
+                            filename=filename,
+                            entity_type=entity_type,
+                            entity_id=entity.id,
+                            source="proposal_asset",
+                            content_base64=b64encode(raw).decode("utf-8"),
+                        )
+                    )
+
+        if len(group_items) == 1:
+            suggested_subject = first_subject or f"Document update from {company_name}"
+        else:
+            suggested_subject = f"Documents for {client_label} from {company_name}"
+
+        suggested_body = "\n".join(
+            [
+                f"Hi {client_label},",
+                "",
+                "Please find the following documents attached:",
+                *item_lines,
+                "",
+                "Let me know if you have any questions.",
+                "",
+                "Best,",
+                company_name,
+            ]
+        )
+
+        subject = payload.subject_overrides.get(group_key) or suggested_subject
+        body = payload.body_overrides.get(group_key) or suggested_body
+
+        send_result = None
+        if payload.send:
+            if not to_email:
+                warnings.append("No recipient email found for this group.")
+                send_result = schemas.EmailComposeSendResult(
+                    sent=False,
+                    message="Recipient email is required for sending.",
+                )
+                _create_email_log(
+                    db,
+                    group_id=group_key,
+                    client_id=client_id,
+                    client_label=client_label,
+                    to_email=to_email,
+                    subject=subject,
+                    body=body,
+                    status="failed",
+                    source="compose",
+                    entity_refs=[
+                        {"entity_type": entity_type, "entity_id": entity.id}
+                        for entity_type, entity, _ in group_items
+                    ],
+                    attachment_count=len(attachments_out),
+                    send_message="Recipient email is required for sending.",
+                    error_message="Recipient email is required for sending.",
+                    created_by_user_id=user.id,
+                )
+                db.commit()
+                failed_groups += 1
+            else:
+                smtp_attachments = [
+                    {
+                        "content": b"" if not attachment.content_base64 else b64decode(attachment.content_base64),
+                        "filename": attachment.filename,
+                        "maintype": (mimetypes.guess_type(attachment.filename)[0] or "application/octet-stream").split("/")[0],
+                        "subtype": (mimetypes.guess_type(attachment.filename)[0] or "application/octet-stream").split("/")[1],
+                    }
+                    for attachment in attachments_out
+                ]
+                sent, message = send_email_smtp(to_email, subject, body, attachments=smtp_attachments)
+                send_result = schemas.EmailComposeSendResult(
+                    sent=sent,
+                    message=message,
+                    sent_at=datetime.now(timezone.utc) if sent else None,
+                )
+                _create_email_log(
+                    db,
+                    group_id=group_key,
+                    client_id=client_id,
+                    client_label=client_label,
+                    to_email=to_email,
+                    subject=subject,
+                    body=body,
+                    status="sent" if sent else "failed",
+                    source="compose",
+                    entity_refs=[
+                        {"entity_type": entity_type, "entity_id": entity.id}
+                        for entity_type, entity, _ in group_items
+                    ],
+                    attachment_count=len(attachments_out),
+                    send_message=message,
+                    error_message=message if not sent else None,
+                    sent_at=datetime.now(timezone.utc) if sent else None,
+                    created_by_user_id=user.id,
+                )
+                if sent:
+                    sent_groups += 1
+                    for entity_type, entity, _ in group_items:
+                        if entity_type == "invoice" and getattr(entity, "status", None) != "paid":
+                            entity.status = "sent"
+                        elif entity_type == "quote" and getattr(entity, "status", None) == "draft":
+                            entity.status = "sent"
+                        elif entity_type == "proposal" and getattr(entity, "status", None) == "draft":
+                            entity.status = "sent"
+                    db.commit()
+                else:
+                    db.commit()
+                    failed_groups += 1
+
+        total_attachments += len(attachments_out)
+        groups_out.append(
+            schemas.EmailComposeGroup(
+                group_id=group_key,
+                client_id=client_id,
+                client_label=client_label,
+                to_email_default=to_default,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+                entities=entities_out,
+                attachments=attachments_out,
+                send_result=send_result,
+                warnings=warnings,
+            )
+        )
+
+    groups_out.sort(key=lambda item: (item.client_label.lower(), item.group_id))
+
+    return schemas.EmailComposeResponse(
+        groups=groups_out,
+        summary=schemas.EmailComposeSummary(
+            total_items=len(deduped_items),
+            total_groups=len(groups_out),
+            total_attachments=total_attachments,
+            sent_groups=sent_groups,
+            failed_groups=failed_groups,
+        ),
+    )
+
+
+@app.get("/email/logs", response_model=list[schemas.EmailLogOut])
+def list_email_logs(db: Session = Depends(get_db), user=Depends(require_user)):
+    if not _email_logs_enabled(db):
+        return []
+    return (
+        db.query(models.EmailLog)
+        .order_by(models.EmailLog.created_at.desc(), models.EmailLog.id.desc())
+        .all()
+    )
+
+
+@app.post("/email/logs/{log_id}/resend", response_model=schemas.EmailComposeResponse)
+def resend_email_log(log_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    if not _email_logs_enabled(db):
+        raise HTTPException(status_code=400, detail="Email logs are not initialized. Run migrations.")
+    log_row = db.query(models.EmailLog).filter(models.EmailLog.id == log_id).first()
+    if not log_row:
+        raise HTTPException(status_code=404, detail="Email log not found")
+    if not log_row.entity_refs:
+        raise HTTPException(status_code=400, detail="Log does not include entities to resend.")
+
+    payload = schemas.EmailComposeRequest(
+        items=[
+            schemas.EmailComposeItem(
+                entity_type=item.get("entity_type", ""),
+                entity_id=int(item.get("entity_id", 0)),
+            )
+            for item in (log_row.entity_refs or [])
+            if item.get("entity_type") and item.get("entity_id")
+        ],
+        send=True,
+        include_proposal_assets=True,
+        to_email_overrides={log_row.group_id: log_row.to_email} if log_row.to_email else {},
+        subject_overrides={log_row.group_id: log_row.subject},
+        body_overrides={log_row.group_id: log_row.body},
+    )
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Log does not include valid entities to resend.")
+    return compose_email(payload=payload, db=db, user=user)
+
+
+@app.post("/email/logs/resend/bulk", response_model=schemas.EmailComposeSummary)
+def resend_email_logs_bulk(
+    payload: schemas.EmailLogBulkActionRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    if not _email_logs_enabled(db):
+        raise HTTPException(status_code=400, detail="Email logs are not initialized. Run migrations.")
+    sent_groups = 0
+    failed_groups = 0
+    total_attachments = 0
+    total_items = 0
+    total_groups = 0
+
+    for log_id in payload.log_ids:
+        try:
+            response = resend_email_log(log_id=log_id, db=db, user=user)
+            sent_groups += int(response.summary.sent_groups or 0)
+            failed_groups += int(response.summary.failed_groups or 0)
+            total_attachments += int(response.summary.total_attachments or 0)
+            total_items += int(response.summary.total_items or 0)
+            total_groups += int(response.summary.total_groups or 0)
+        except HTTPException:
+            failed_groups += 1
+
+    return schemas.EmailComposeSummary(
+        total_items=total_items,
+        total_groups=total_groups,
+        total_attachments=total_attachments,
+        sent_groups=sent_groups,
+        failed_groups=failed_groups,
+    )
+
+
+@app.post("/email/logs/{log_id}/mark-delivered", response_model=schemas.EmailLogOut)
+def mark_email_log_delivered(log_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    if not _email_logs_enabled(db):
+        raise HTTPException(status_code=400, detail="Email logs are not initialized. Run migrations.")
+    log_row = db.query(models.EmailLog).filter(models.EmailLog.id == log_id).first()
+    if not log_row:
+        raise HTTPException(status_code=404, detail="Email log not found")
+    log_row.status = "delivered"
+    log_row.delivered_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(log_row)
+    return log_row
+
+
+@app.post("/email/logs/mark-delivered/bulk", response_model=list[schemas.EmailLogOut])
+def mark_email_logs_delivered_bulk(
+    payload: schemas.EmailLogBulkActionRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    if not _email_logs_enabled(db):
+        raise HTTPException(status_code=400, detail="Email logs are not initialized. Run migrations.")
+    logs = (
+        db.query(models.EmailLog)
+        .filter(models.EmailLog.id.in_(payload.log_ids))
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for log_row in logs:
+        log_row.status = "delivered"
+        log_row.delivered_at = now
+    db.commit()
+    for log_row in logs:
+        db.refresh(log_row)
+    return logs

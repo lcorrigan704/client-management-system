@@ -184,6 +184,23 @@ const api = {
   deleteExpense: (id) => request(`/expenses/${id}`, { method: "DELETE" }),
   draftEmail: (payload) =>
     request("/email/draft", { method: "POST", body: JSON.stringify(payload) }),
+  composeEmail: (payload) =>
+    request("/email/compose", { method: "POST", body: JSON.stringify(payload) }),
+  listEmailLogs: () => request("/email/logs"),
+  resendEmailLog: (id) =>
+    request(`/email/logs/${id}/resend`, { method: "POST" }),
+  resendEmailLogsBulk: (logIds) =>
+    request("/email/logs/resend/bulk", {
+      method: "POST",
+      body: JSON.stringify({ log_ids: logIds }),
+    }),
+  markEmailLogDelivered: (id) =>
+    request(`/email/logs/${id}/mark-delivered`, { method: "POST" }),
+  markEmailLogsDeliveredBulk: (logIds) =>
+    request("/email/logs/mark-delivered/bulk", {
+      method: "POST",
+      body: JSON.stringify({ log_ids: logIds }),
+    }),
   createBackup: async ({ download = true, store = true } = {}) => {
     if (download) {
       const response = await fetch(`${API_URL}/admin/backup`, {

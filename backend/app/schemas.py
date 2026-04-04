@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
-from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 
 
 def _blank_to_none(value):
@@ -632,6 +632,110 @@ class EmailDraftRequest(BaseModel):
         if value == "":
             return None
         return value
+
+
+class EmailComposeItem(BaseModel):
+    entity_type: str
+    entity_id: int
+
+
+class EmailComposeRequest(BaseModel):
+    items: list[EmailComposeItem]
+    to_email_overrides: dict[str, EmailStr | None] = Field(default_factory=dict)
+    subject_overrides: dict[str, str] = Field(default_factory=dict)
+    body_overrides: dict[str, str] = Field(default_factory=dict)
+    send: bool = False
+    include_proposal_assets: bool = True
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(cls, value):
+        if not value:
+            raise ValueError("At least one item is required.")
+        return value
+
+
+class EmailComposeAttachment(BaseModel):
+    filename: str
+    entity_type: str
+    entity_id: int
+    source: str
+    content_base64: Optional[str] = None
+
+
+class EmailComposeEntityOut(BaseModel):
+    entity_type: str
+    entity_id: int
+    display_id: Optional[str] = None
+    title: Optional[str] = None
+
+
+class EmailComposeSendResult(BaseModel):
+    sent: bool
+    message: str
+    sent_at: Optional[datetime] = None
+
+
+class EmailComposeGroup(BaseModel):
+    group_id: str
+    client_id: Optional[int] = None
+    client_label: str
+    to_email_default: Optional[EmailStr] = None
+    to_email: Optional[EmailStr] = None
+    subject: str
+    body: str
+    entities: list[EmailComposeEntityOut]
+    attachments: list[EmailComposeAttachment]
+    send_result: Optional[EmailComposeSendResult] = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class EmailComposeSummary(BaseModel):
+    total_items: int
+    total_groups: int
+    total_attachments: int
+    sent_groups: int = 0
+    failed_groups: int = 0
+
+
+class EmailComposeResponse(BaseModel):
+    groups: list[EmailComposeGroup]
+    summary: EmailComposeSummary
+
+
+class EmailLogOut(BaseModel):
+    id: int
+    group_id: str
+    client_id: Optional[int] = None
+    client_label: str
+    to_email: Optional[EmailStr] = None
+    subject: str
+    body: str
+    status: str
+    source: str
+    entity_refs: list[dict] = Field(default_factory=list)
+    attachment_count: int = 0
+    send_message: Optional[str] = None
+    provider_message_id: Optional[str] = None
+    error_message: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    created_by_user_id: Optional[int] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailLogBulkActionRequest(BaseModel):
+    log_ids: list[int]
+
+    @field_validator("log_ids")
+    @classmethod
+    def validate_log_ids(cls, value):
+        unique_ids = sorted({int(item) for item in value if int(item) > 0})
+        if not unique_ids:
+            raise ValueError("At least one log id is required.")
+        return unique_ids
 
 
 class AuthLoginRequest(BaseModel):

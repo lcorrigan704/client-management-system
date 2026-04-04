@@ -1,5 +1,18 @@
 import { format } from "date-fns";
 
+const hasTimezoneInfo = (raw) => /([zZ]|[+-]\d{2}:\d{2})$/.test(raw);
+
+const parseDate = (value, { assumeUtcIfNaive = false } = {}) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const raw = String(value);
+  const normalized =
+    assumeUtcIfNaive && !hasTimezoneInfo(raw) ? `${raw}Z` : raw;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
 const toDateTime = (dateValue) => {
   if (!dateValue) return null;
   if (dateValue instanceof Date) {
@@ -10,8 +23,8 @@ const toDateTime = (dateValue) => {
 
 const formatDate = (value) => {
   if (!value) return "—";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  const date = parseDate(value);
+  if (!date) return "—";
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const year = date.getFullYear();
@@ -20,8 +33,8 @@ const formatDate = (value) => {
 
 const formatDateTime = (value) => {
   if (!value) return "—";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  const date = parseDate(value, { assumeUtcIfNaive: true });
+  if (!date) return "—";
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const year = date.getFullYear();
@@ -32,8 +45,8 @@ const formatDateTime = (value) => {
 
 const toTimestamp = (value) => {
   if (!value) return 0;
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  const date = parseDate(value, { assumeUtcIfNaive: true });
+  return date ? date.getTime() : 0;
 };
 
 const gbpFormatter = new Intl.NumberFormat("en-GB", {

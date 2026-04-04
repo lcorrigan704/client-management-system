@@ -564,6 +564,36 @@ class ExpenseReceipt(Base):
     expense: Mapped["Expense"] = relationship("Expense", back_populates="receipts")
 
 
+class EmailLog(Base):
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    client_label: Mapped[str] = mapped_column(String(200), nullable=False)
+    to_email: Mapped[str | None] = mapped_column(String(300))
+    subject: Mapped[str] = mapped_column(Text(), nullable=False)
+    body: Mapped[str] = mapped_column(Text(), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="sent", index=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="compose")
+    entity_refs: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    attachment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    send_message: Mapped[str | None] = mapped_column(Text())
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    error_message: Mapped[str | None] = mapped_column(Text())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    client: Mapped["Client"] = relationship("Client")
+    created_by: Mapped["User"] = relationship("User")
+
+
 class InvoicePayment(Base):
     __tablename__ = "invoice_payments"
 
