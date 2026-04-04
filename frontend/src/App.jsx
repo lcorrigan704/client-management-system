@@ -1,21 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { parseISO } from "date-fns";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
-import { AppSidebar } from "@/components/app-sidebar";
-import DashboardPage from "@/pages/DashboardPage";
+import AppShell from "@/components/app-shell";
 import AuthPage from "@/pages/AuthPage";
 import SetupWizard from "@/pages/SetupWizard";
-import ClientsPage from "@/pages/ClientsPage";
-import InvoicesPage from "@/pages/InvoicesPage";
-import RevenueAdjustmentsPage from "@/pages/RevenueAdjustmentsPage";
-import QuotesPage from "@/pages/QuotesPage";
-import AgreementsPage from "@/pages/AgreementsPage";
-import ProposalsPage from "@/pages/ProposalsPage";
-import ExpensesPage from "@/pages/ExpensesPage";
-import EmailsPage from "@/pages/EmailsPage";
-import SettingsPage from "@/pages/SettingsPage";
-import UsersPage from "@/pages/UsersPage";
 import { api } from "@/api/client";
 import {
   emptyClient,
@@ -41,32 +30,24 @@ import { getAgreementColumns } from "@/columns/agreements.jsx";
 import { getProposalColumns } from "@/columns/proposals.jsx";
 import { getExpenseColumns } from "@/columns/expenses.jsx";
 import { getUserColumns } from "@/columns/users.jsx";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import ViewLoadingFallback from "@/components/view-loading-fallback";
+import { VIEWS, NAV_ITEMS, NAV_GROUPS, buildNavGroups } from "@/navigation/views";
+import useViewNavigation from "@/hooks/useViewNavigation";
+
+const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
+const ClientsPage = lazy(() => import("@/pages/ClientsPage"));
+const InvoicesPage = lazy(() => import("@/pages/InvoicesPage"));
+const RevenueAdjustmentsPage = lazy(() => import("@/pages/RevenueAdjustmentsPage"));
+const QuotesPage = lazy(() => import("@/pages/QuotesPage"));
+const AgreementsPage = lazy(() => import("@/pages/AgreementsPage"));
+const ProposalsPage = lazy(() => import("@/pages/ProposalsPage"));
+const ExpensesPage = lazy(() => import("@/pages/ExpensesPage"));
+const EmailsPage = lazy(() => import("@/pages/EmailsPage"));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const UsersPage = lazy(() => import("@/pages/UsersPage"));
 
 export default function App() {
-  const [view, setView] = useState("dashboard");
-  const navigateTo = useCallback(
-    (nextView) => {
-      if (!nextView || nextView === view) return;
-
-      const updateView = () => setView(nextView);
-      const reduceMotion =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-      if (
-        !reduceMotion &&
-        typeof document !== "undefined" &&
-        typeof document.startViewTransition === "function"
-      ) {
-        document.startViewTransition(updateView);
-        return;
-      }
-
-      updateView();
-    },
-    [view]
-  );
+  const { view, navDirection, navigateTo } = useViewNavigation(VIEWS.DASHBOARD);
   const handleLoadError = useCallback(
     (error) => toast.error(error.message || "Unable to load data."),
     []
@@ -181,7 +162,7 @@ export default function App() {
     onCopySuccess: handleEmailCopySuccess,
     onCopyError: handleEmailCopyError,
     onSendSuccess: handleEmailSendSuccess,
-    isActive: view === "emails",
+    isActive: view === VIEWS.EMAILS,
   });
 
   const { updateSettings, saveSettings } = useSettings({
@@ -939,7 +920,7 @@ export default function App() {
       const agreement = agreements.find((item) => item.id === idNum);
       clientId = agreement ? String(agreement.client_id) : "";
     }
-    navigateTo("emails");
+    navigateTo(VIEWS.EMAILS);
     const toEmail = getEntityEmail(entityType, entityId);
     setEmailForm((prev) => ({
       ...prev,
@@ -955,7 +936,7 @@ export default function App() {
   const openCreditNoteForInvoice = useCallback(
     (invoice) => {
       setSelectedAdjustmentInvoiceId(invoice.id);
-      navigateTo("adjustments");
+      navigateTo(VIEWS.ADJUSTMENTS);
       setCreditNoteForm({
         invoice_id: String(invoice.id),
         issued_at: new Date(),
@@ -977,7 +958,7 @@ export default function App() {
 
   const handleViewInvoiceAdjustments = useCallback((invoice) => {
     setSelectedAdjustmentInvoiceId(invoice.id);
-    navigateTo("adjustments");
+    navigateTo(VIEWS.ADJUSTMENTS);
   }, [navigateTo]);
 
   const handleEditCreditNote = useCallback((creditNote) => {
@@ -1225,32 +1206,7 @@ export default function App() {
     [loadAll]
   );
 
-  const navItems = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "clients", label: "Clients" },
-    { id: "invoices", label: "Invoices" },
-    { id: "quotes", label: "Quotes" },
-    { id: "adjustments", label: "Adjustments" },
-    { id: "agreements", label: "Agreements" },
-    { id: "proposals", label: "Proposals" },
-    { id: "expenses", label: "Expenses" },
-    { id: "emails", label: "Emails" },
-  ];
-
-  const navGroups = [
-    { label: "Overview", items: ["dashboard"] },
-    { label: "Clients", items: ["clients"] },
-    { label: "Revenue", items: ["invoices", "quotes", "adjustments"] },
-    { label: "Agreements", items: ["agreements", "proposals"] },
-    { label: "Operations", items: ["expenses", "emails"] },
-  ]
-    .map((group) => ({
-      label: group.label,
-      items: group.items
-        .map((id) => navItems.find((item) => item.id === id))
-        .filter(Boolean),
-    }))
-    .filter((group) => group.items.length);
+  const navGroups = useMemo(() => buildNavGroups(NAV_ITEMS, NAV_GROUPS), []);
 
   const userMap = useMemo(() => {
     const map = new Map();
@@ -1574,31 +1530,23 @@ export default function App() {
   const canManageSettings = user.role !== "user";
 
   return (
-    <SidebarProvider>
-      <div className="flex w-full min-h-screen bg-background">
-        <Toaster position="top-right" theme="system" richColors />
-        <AppSidebar
-          companyName={settings?.company_name || "Your Company"}
-          navGroups={navGroups}
-          view={view}
-          setView={navigateTo}
-          selectedYear={selectedYear}
-          setSelectedYear={setSelectedYear}
-          financialYears={financialYears}
-          formatFinancialYearLabel={formatFinancialYearLabel}
-          onLogout={logout}
-          showSettings={canManageSettings}
-          showUsers={user?.role === "owner"}
-          userEmail={user?.email}
-        />
-        <SidebarInset>
-          <header className="flex items-center justify-between gap-4 border-b bg-background px-4 py-3 lg:hidden">
-            <SidebarTrigger />
-            <div className="text-sm font-semibold text-foreground">Navigation</div>
-          </header>
-          <main className="w-full space-y-10 px-4 py-8">
-            <div className="app-view-transition">
-        {view === "dashboard" && (
+    <AppShell
+      companyName={settings?.company_name || "Your Company"}
+      navGroups={navGroups}
+      view={view}
+      navigateTo={navigateTo}
+      selectedYear={selectedYear}
+      setSelectedYear={setSelectedYear}
+      financialYears={financialYears}
+      formatFinancialYearLabel={formatFinancialYearLabel}
+      logout={logout}
+      canManageSettings={canManageSettings}
+      isOwner={user?.role === "owner"}
+      userEmail={user?.email}
+    >
+      <div className="app-view-transition" data-nav-direction={navDirection}>
+        <Suspense fallback={<ViewLoadingFallback />}>
+        {view === VIEWS.DASHBOARD && (
           <DashboardPage
             selectedYear={selectedYear}
             financialTotals={financialTotals}
@@ -1611,7 +1559,7 @@ export default function App() {
             formatGBP={formatGBP}
           />
         )}
-        {view === "clients" && (
+        {view === VIEWS.CLIENTS && (
           <ClientsPage
             clients={filteredClients}
             clientColumns={clientColumns}
@@ -1625,7 +1573,7 @@ export default function App() {
             onBulkDelete={handleBulkDeleteClients}
           />
         )}
-        {view === "invoices" && (
+        {view === VIEWS.INVOICES && (
           <InvoicesPage
             invoices={filteredInvoices}
             clients={clients}
@@ -1645,7 +1593,7 @@ export default function App() {
             emptyInvoice={emptyInvoice}
           />
         )}
-        {view === "quotes" && (
+        {view === VIEWS.QUOTES && (
           <QuotesPage
             quotes={filteredQuotes}
             clients={clients}
@@ -1662,7 +1610,7 @@ export default function App() {
             emptyQuote={emptyQuote}
           />
         )}
-        {view === "adjustments" && (
+        {view === VIEWS.ADJUSTMENTS && (
           <RevenueAdjustmentsPage
             creditNotes={creditNotes}
             refunds={refunds}
@@ -1692,7 +1640,7 @@ export default function App() {
             clearInvoiceFilter={() => setSelectedAdjustmentInvoiceId(null)}
           />
         )}
-        {view === "agreements" && (
+        {view === VIEWS.AGREEMENTS && (
           <AgreementsPage
             agreements={filteredAgreements}
             clients={clients}
@@ -1710,7 +1658,7 @@ export default function App() {
             currentUserEmail={user?.email}
           />
         )}
-        {view === "proposals" && (
+        {view === VIEWS.PROPOSALS && (
           <ProposalsPage
             proposals={filteredProposals}
             clients={clients}
@@ -1730,7 +1678,7 @@ export default function App() {
             currentUserEmail={user?.email}
           />
         )}
-        {view === "expenses" && (
+        {view === VIEWS.EXPENSES && (
           <ExpensesPage
             expenses={filteredExpenses}
             clients={clients}
@@ -1747,7 +1695,7 @@ export default function App() {
             onBulkDelete={handleBulkDeleteExpenses}
           />
         )}
-        {view === "emails" && (
+        {view === VIEWS.EMAILS && (
           <EmailsPage
             emailResponse={emailResponse}
             emailDialogOpen={emailDialogOpen}
@@ -1761,7 +1709,7 @@ export default function App() {
             clients={clients}
           />
         )}
-        {view === "settings" && canManageSettings && (
+        {view === VIEWS.SETTINGS && canManageSettings && (
           <SettingsPage
             settings={settings}
             updateSettings={updateSettings}
@@ -1776,7 +1724,7 @@ export default function App() {
             onResetWorkspace={handleResetWorkspace}
           />
         )}
-        {view === "users" && user?.role === "owner" && (
+        {view === VIEWS.USERS && user?.role === "owner" && (
           <UsersPage
             users={users}
             userColumns={userColumns}
@@ -1790,10 +1738,8 @@ export default function App() {
             onBulkDelete={handleBulkDeleteUsers}
           />
         )}
-            </div>
-          </main>
-        </SidebarInset>
+        </Suspense>
       </div>
-    </SidebarProvider>
+    </AppShell>
   );
 }
