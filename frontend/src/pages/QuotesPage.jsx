@@ -22,6 +22,7 @@ export default function QuotesPage({
   handleQuoteSubmit,
   onBulkDelete,
   onBulkSendReminder,
+  onBulkCompose,
   emptyQuote,
 }) {
   const clientMap = new Map(clients.map((client) => [client.id, client]));
@@ -119,6 +120,11 @@ export default function QuotesPage({
             exportConfig={exportConfig}
             enableRowSelection
             bulkActions={[
+              {
+                label: "Compose from selected",
+                variant: "outline",
+                onClick: (rows) => onBulkCompose?.(rows),
+              },
               {
                 label: "Send reminders",
                 variant: "outline",
