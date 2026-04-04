@@ -45,6 +45,28 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 
 export default function App() {
   const [view, setView] = useState("dashboard");
+  const navigateTo = useCallback(
+    (nextView) => {
+      if (!nextView || nextView === view) return;
+
+      const updateView = () => setView(nextView);
+      const reduceMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      if (
+        !reduceMotion &&
+        typeof document !== "undefined" &&
+        typeof document.startViewTransition === "function"
+      ) {
+        document.startViewTransition(updateView);
+        return;
+      }
+
+      updateView();
+    },
+    [view]
+  );
   const handleLoadError = useCallback(
     (error) => toast.error(error.message || "Unable to load data."),
     []
@@ -917,7 +939,7 @@ export default function App() {
       const agreement = agreements.find((item) => item.id === idNum);
       clientId = agreement ? String(agreement.client_id) : "";
     }
-    setView("emails");
+    navigateTo("emails");
     const toEmail = getEntityEmail(entityType, entityId);
     setEmailForm((prev) => ({
       ...prev,
@@ -933,7 +955,7 @@ export default function App() {
   const openCreditNoteForInvoice = useCallback(
     (invoice) => {
       setSelectedAdjustmentInvoiceId(invoice.id);
-      setView("adjustments");
+      navigateTo("adjustments");
       setCreditNoteForm({
         invoice_id: String(invoice.id),
         issued_at: new Date(),
@@ -950,13 +972,13 @@ export default function App() {
       setEditingCreditNoteId(null);
       setCreditNoteDialogOpen(true);
     },
-    []
+    [navigateTo]
   );
 
   const handleViewInvoiceAdjustments = useCallback((invoice) => {
     setSelectedAdjustmentInvoiceId(invoice.id);
-    setView("adjustments");
-  }, []);
+    navigateTo("adjustments");
+  }, [navigateTo]);
 
   const handleEditCreditNote = useCallback((creditNote) => {
     setCreditNoteForm({
@@ -1559,7 +1581,7 @@ export default function App() {
           companyName={settings?.company_name || "Your Company"}
           navGroups={navGroups}
           view={view}
-          setView={setView}
+          setView={navigateTo}
           selectedYear={selectedYear}
           setSelectedYear={setSelectedYear}
           financialYears={financialYears}
@@ -1575,6 +1597,7 @@ export default function App() {
             <div className="text-sm font-semibold text-foreground">Navigation</div>
           </header>
           <main className="w-full space-y-10 px-4 py-8">
+            <div className="app-view-transition">
         {view === "dashboard" && (
           <DashboardPage
             selectedYear={selectedYear}
@@ -1584,7 +1607,7 @@ export default function App() {
             filteredAgreements={filteredAgreements}
             complianceDates={complianceDates}
             settings={settings}
-            onNavigate={setView}
+            onNavigate={navigateTo}
             formatGBP={formatGBP}
           />
         )}
@@ -1767,6 +1790,7 @@ export default function App() {
             onBulkDelete={handleBulkDeleteUsers}
           />
         )}
+            </div>
           </main>
         </SidebarInset>
       </div>

@@ -7,6 +7,99 @@ from . import models, schemas
 from .security import encrypt_secret, hash_password
 
 
+def _round_money(value: float | int | None) -> float:
+    return round(float(value or 0) + 1e-9, 2)
+
+
+def _line_tax_totals(quantity: float, unit_amount: float, tax_rate: float = 0, tax_inclusive: bool = False):
+    gross_input = float(quantity or 0) * float(unit_amount or 0)
+    rate = float(tax_rate or 0)
+    if tax_inclusive and rate > 0:
+        net = gross_input / (1 + (rate / 100))
+        tax = gross_input - net
+        gross = gross_input
+    else:
+        net = gross_input
+        tax = net * (rate / 100)
+        gross = net + tax
+    return _round_money(net), _round_money(tax), _round_money(gross)
+
+
+def _build_line_item_model(model_cls, item: dict):
+    quantity = float(item.get("quantity") or 0)
+    unit_amount = float(item.get("unit_amount") or 0)
+    tax_rate = float(item.get("tax_rate") or 0)
+    tax_inclusive = bool(item.get("tax_inclusive") or False)
+    net_amount, tax_amount, gross_amount = _line_tax_totals(
+        quantity, unit_amount, tax_rate, tax_inclusive
+    )
+    return model_cls(
+        description=item["description"],
+        quantity=quantity,
+        unit_amount=unit_amount,
+        net_amount=net_amount,
+        tax_amount=tax_amount,
+        gross_amount=gross_amount,
+        tax_rate=tax_rate,
+        tax_code=item.get("tax_code") or "standard",
+        tax_kind=item.get("tax_kind") or "vat",
+        tax_inclusive=tax_inclusive,
+    )
+
+
+def _apply_document_totals(document, line_items):
+    document.net_amount = _round_money(sum(float(item.net_amount or 0) for item in line_items))
+    document.tax_amount = _round_money(sum(float(item.tax_amount or 0) for item in line_items))
+    document.gross_amount = _round_money(sum(float(item.gross_amount or 0) for item in line_items))
+    document.amount = document.gross_amount
+    first_item = line_items[0] if line_items else None
+    document.tax_rate = float(getattr(first_item, "tax_rate", 0) or 0)
+    document.tax_code = getattr(first_item, "tax_code", "standard") if first_item else "standard"
+    document.tax_kind = getattr(first_item, "tax_kind", "vat") if first_item else "vat"
+    document.tax_inclusive = bool(getattr(first_item, "tax_inclusive", False)) if first_item else False
+
+
+def _default_payment_allocation(invoice: models.Invoice, amount: float):
+    invoice_gross = float(invoice.gross_amount or invoice.amount or 0)
+    if invoice_gross <= 0:
+        return {
+            "tax_kind": invoice.tax_kind or "vat",
+            "tax_code": invoice.tax_code or "standard",
+            "tax_rate": float(invoice.tax_rate or 0),
+            "net_amount": _round_money(amount),
+            "tax_amount": 0.0,
+            "gross_amount": _round_money(amount),
+        }
+    ratio = min(1.0, max(0.0, float(amount or 0) / invoice_gross))
+    tax_amount = _round_money(float(invoice.tax_amount or 0) * ratio)
+    gross_amount = _round_money(amount)
+    net_amount = _round_money(gross_amount - tax_amount)
+    return {
+        "tax_kind": invoice.tax_kind or "vat",
+        "tax_code": invoice.tax_code or "standard",
+        "tax_rate": float(invoice.tax_rate or 0),
+        "net_amount": net_amount,
+        "tax_amount": tax_amount,
+        "gross_amount": gross_amount,
+    }
+
+
+def _refresh_invoice_payment_status(db: Session, invoice: models.Invoice):
+    paid_total = _round_money(sum(float(payment.amount or 0) for payment in invoice.payments))
+    invoice_total = _round_money(float(invoice.gross_amount or invoice.amount or 0))
+    if paid_total >= invoice_total and invoice_total > 0:
+        invoice.status = "paid"
+        if not invoice.paid_at:
+            latest_paid = max((payment.paid_at for payment in invoice.payments), default=datetime.utcnow())
+            invoice.paid_at = latest_paid
+    else:
+        if invoice.status == "paid":
+            invoice.status = "sent"
+        invoice.paid_at = None
+    db.commit()
+    db.refresh(invoice)
+
+
 def build_display_id(prefix: str, numeric_id: int) -> str:
     return f"{prefix}-{numeric_id + 999}"
 
@@ -33,6 +126,36 @@ def get_or_create_settings(db: Session) -> models.Settings:
             changed = True
         if not getattr(settings, "refund_prefix", None):
             settings.refund_prefix = "RF"
+            changed = True
+        if getattr(settings, "default_vat_rate", None) is None:
+            settings.default_vat_rate = 20
+            changed = True
+        if not getattr(settings, "vat_scheme", None):
+            settings.vat_scheme = "standard"
+            changed = True
+        if not getattr(settings, "vat_filing_frequency", None):
+            settings.vat_filing_frequency = "quarterly"
+            changed = True
+        if getattr(settings, "vat_period_start_month", None) is None:
+            settings.vat_period_start_month = settings.fy_start_month or 1
+            changed = True
+        if getattr(settings, "vat_period_start_day", None) is None:
+            settings.vat_period_start_day = settings.fy_start_day or 1
+            changed = True
+        if not getattr(settings, "vat_accounting_method", None):
+            settings.vat_accounting_method = "accrual"
+            changed = True
+        if getattr(settings, "corporation_tax_rate", None) is None:
+            settings.corporation_tax_rate = 25
+            changed = True
+        if getattr(settings, "corporation_tax_period_start_month", None) is None:
+            settings.corporation_tax_period_start_month = settings.fy_start_month or 1
+            changed = True
+        if getattr(settings, "corporation_tax_period_start_day", None) is None:
+            settings.corporation_tax_period_start_day = settings.fy_start_day or 1
+            changed = True
+        if getattr(settings, "other_taxes", None) is None:
+            settings.other_taxes = []
             changed = True
         if changed:
             db.commit()
@@ -330,6 +453,10 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
                     "description": item.description,
                     "quantity": float(item.quantity),
                     "unit_amount": float(item.unit_amount),
+                    "tax_rate": float(getattr(item, "tax_rate", 0) or 0),
+                    "tax_code": getattr(item, "tax_code", "standard"),
+                    "tax_kind": getattr(item, "tax_kind", "vat"),
+                    "tax_inclusive": bool(getattr(item, "tax_inclusive", False)),
                 }
                 for item in quote.line_items
             ]
@@ -371,16 +498,10 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
         db.refresh(invoice)
         if line_items:
             invoice.line_items = [
-                models.InvoiceLineItem(
-                    description=item["description"],
-                    quantity=item["quantity"],
-                    unit_amount=item["unit_amount"],
-                )
+                _build_line_item_model(models.InvoiceLineItem, item)
                 for item in line_items
             ]
-            invoice.amount = sum(
-                float(item.quantity) * float(item.unit_amount) for item in invoice.line_items
-            )
+            _apply_document_totals(invoice, invoice.line_items)
             db.commit()
             db.refresh(invoice)
         if not invoice.display_id:
@@ -492,16 +613,10 @@ def update_invoice(db: Session, invoice: models.Invoice, payload: schemas.Invoic
         setattr(invoice, field, value)
     if line_items is not None:
         invoice.line_items = [
-            models.InvoiceLineItem(
-                description=item["description"],
-                quantity=item["quantity"],
-                unit_amount=item["unit_amount"],
-            )
+            _build_line_item_model(models.InvoiceLineItem, item)
             for item in line_items
         ]
-        invoice.amount = sum(
-            float(item.quantity) * float(item.unit_amount) for item in invoice.line_items
-        )
+        _apply_document_totals(invoice, invoice.line_items)
     db.commit()
     db.refresh(invoice)
     if not invoice.display_id:
@@ -514,10 +629,25 @@ def update_invoice(db: Session, invoice: models.Invoice, payload: schemas.Invoic
 
 
 def mark_invoice_paid(db: Session, invoice: models.Invoice):
-    invoice.status = "paid"
-    invoice.paid_at = datetime.utcnow()
+    paid_total = _round_money(sum(float(payment.amount or 0) for payment in invoice.payments))
+    remaining = _round_money(float(invoice.gross_amount or invoice.amount or 0) - paid_total)
+    if remaining <= 0:
+        _refresh_invoice_payment_status(db, invoice)
+        return invoice
+    payment = models.InvoicePayment(
+        invoice_id=invoice.id,
+        amount=remaining,
+        paid_at=datetime.utcnow(),
+        reference="Marked as paid",
+        method="manual",
+    )
+    payment.tax_allocations = [
+        models.PaymentTaxAllocation(**_default_payment_allocation(invoice, remaining))
+    ]
+    db.add(payment)
     db.commit()
     db.refresh(invoice)
+    _refresh_invoice_payment_status(db, invoice)
     return invoice
 
 
@@ -572,6 +702,9 @@ def create_credit_note(db: Session, payload: schemas.CreditNoteCreate):
     db.refresh(credit_note)
 
     total_amount = 0.0
+    total_net = 0.0
+    total_tax = 0.0
+    total_gross = 0.0
     line_items = []
     invoice_line_item_ids = {item.id for item in invoice.line_items}
     for item in payload.line_items:
@@ -597,12 +730,31 @@ def create_credit_note(db: Session, payload: schemas.CreditNoteCreate):
                 description=invoice_line.description,
                 source_unit_amount=invoice_line.unit_amount,
                 credited_quantity=item.credited_quantity,
+                net_amount=_round_money(
+                    float(getattr(invoice_line, "net_amount", source_total))
+                    * (float(item.credited_amount) / max(source_total, 0.01))
+                ),
+                tax_amount=_round_money(
+                    float(getattr(invoice_line, "tax_amount", 0))
+                    * (float(item.credited_amount) / max(source_total, 0.01))
+                ),
+                gross_amount=_round_money(float(item.credited_amount)),
+                tax_rate=float(getattr(invoice_line, "tax_rate", 0) or 0),
+                tax_code=getattr(invoice_line, "tax_code", "standard"),
+                tax_kind=getattr(invoice_line, "tax_kind", "vat"),
+                tax_inclusive=bool(getattr(invoice_line, "tax_inclusive", False)),
                 credited_amount=item.credited_amount,
             )
         )
         total_amount += float(item.credited_amount)
+        total_net += float(line_items[-1].net_amount or 0)
+        total_tax += float(line_items[-1].tax_amount or 0)
+        total_gross += float(line_items[-1].gross_amount or 0)
 
     credit_note.line_items = line_items
+    credit_note.net_amount = _round_money(total_net)
+    credit_note.tax_amount = _round_money(total_tax)
+    credit_note.gross_amount = _round_money(total_gross)
     credit_note.total_amount = total_amount
     settings = get_or_create_settings(db)
     credit_note.display_id = build_display_id(settings.credit_note_prefix, credit_note.id)
@@ -637,8 +789,18 @@ def create_refund(db: Session, payload: schemas.RefundCreate):
         invoice_id=credit_note.invoice_id,
         refunded_at=payload.refunded_at or datetime.utcnow(),
         amount=payload.amount,
+        gross_amount=_round_money(payload.amount),
+        tax_amount=_round_money(
+            float(payload.amount or 0)
+            * (
+                float(credit_note.tax_amount or 0)
+                / max(float(credit_note.gross_amount or credit_note.total_amount or 1), 1)
+            )
+        ),
+        net_amount=0,
         notes=payload.notes,
     )
+    refund.net_amount = _round_money(float(refund.gross_amount or 0) - float(refund.tax_amount or 0))
     db.add(refund)
     db.commit()
     db.refresh(refund)
@@ -663,6 +825,13 @@ def update_refund(db: Session, refund: models.Refund, payload: schemas.RefundUpd
             raise ValueError("Refund amount exceeds the remaining credit note balance.")
     for field, value in data.items():
         setattr(refund, field, value)
+    if "amount" in data:
+        ratio = float(refund.credit_note.tax_amount or 0) / max(
+            float(refund.credit_note.gross_amount or refund.credit_note.total_amount or 1), 1
+        )
+        refund.gross_amount = _round_money(refund.amount)
+        refund.tax_amount = _round_money(float(refund.amount or 0) * ratio)
+        refund.net_amount = _round_money(float(refund.amount or 0) - float(refund.tax_amount or 0))
     db.commit()
     db.refresh(refund)
     return refund
@@ -680,16 +849,10 @@ def create_quote(db: Session, client_id: int, payload: schemas.QuoteCreate):
     settings = get_or_create_settings(db)
     if line_items:
         quote.line_items = [
-            models.QuoteLineItem(
-                description=item["description"],
-                quantity=item["quantity"],
-                unit_amount=item["unit_amount"],
-            )
+            _build_line_item_model(models.QuoteLineItem, item)
             for item in line_items
         ]
-        quote.amount = sum(
-            float(item.quantity) * float(item.unit_amount) for item in quote.line_items
-        )
+        _apply_document_totals(quote, quote.line_items)
         db.commit()
         db.refresh(quote)
     if not quote.display_id:
@@ -723,16 +886,10 @@ def update_quote(db: Session, quote: models.Quote, payload: schemas.QuoteUpdate)
         setattr(quote, field, value)
     if line_items is not None:
         quote.line_items = [
-            models.QuoteLineItem(
-                description=item["description"],
-                quantity=item["quantity"],
-                unit_amount=item["unit_amount"],
-            )
+            _build_line_item_model(models.QuoteLineItem, item)
             for item in line_items
         ]
-        quote.amount = sum(
-            float(item.quantity) * float(item.unit_amount) for item in quote.line_items
-        )
+        _apply_document_totals(quote, quote.line_items)
     db.commit()
     db.refresh(quote)
     if not quote.display_id:
@@ -930,6 +1087,13 @@ def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseC
     if len(receipts) == 0:
         raise ValueError("At least one receipt is required.")
     expense = models.Expense(client_id=client_id, **data)
+    net_amount, tax_amount, gross_amount = _line_tax_totals(
+        1, float(expense.amount or 0), float(expense.tax_rate or 0), bool(expense.tax_inclusive)
+    )
+    expense.net_amount = _round_money(data.get("net_amount", net_amount))
+    expense.tax_amount = _round_money(data.get("tax_amount", tax_amount))
+    expense.gross_amount = _round_money(data.get("gross_amount", gross_amount))
+    expense.amount = expense.gross_amount
     db.add(expense)
     db.commit()
     db.refresh(expense)
@@ -969,6 +1133,17 @@ def update_expense(db: Session, expense: models.Expense, payload: schemas.Expens
         expense.is_legacy = bool(data.pop("is_legacy"))
     for field, value in data.items():
         setattr(expense, field, value)
+    if any(
+        field in data
+        for field in ("amount", "net_amount", "tax_amount", "gross_amount", "tax_rate", "tax_inclusive")
+    ):
+        net_amount, tax_amount, gross_amount = _line_tax_totals(
+            1, float(expense.amount or 0), float(expense.tax_rate or 0), bool(expense.tax_inclusive)
+        )
+        expense.net_amount = _round_money(data.get("net_amount", net_amount))
+        expense.tax_amount = _round_money(data.get("tax_amount", tax_amount))
+        expense.gross_amount = _round_money(data.get("gross_amount", gross_amount))
+        expense.amount = expense.gross_amount
     if receipts is not None:
         if len(receipts) == 0:
             raise ValueError("At least one receipt is required.")
@@ -990,3 +1165,107 @@ def update_expense(db: Session, expense: models.Expense, payload: schemas.Expens
 def delete_expense(db: Session, expense: models.Expense):
     db.delete(expense)
     db.commit()
+
+
+def get_payments(db: Session):
+    return db.query(models.InvoicePayment).order_by(models.InvoicePayment.paid_at.desc()).all()
+
+
+def create_invoice_payment(db: Session, invoice: models.Invoice, payload: schemas.InvoicePaymentCreate):
+    amount = _round_money(payload.amount)
+    if amount <= 0:
+        raise ValueError("Payment amount must be greater than zero.")
+    paid_total = _round_money(sum(float(payment.amount or 0) for payment in invoice.payments))
+    remaining = _round_money(float(invoice.gross_amount or invoice.amount or 0) - paid_total)
+    if amount > remaining + 0.0001:
+        raise ValueError("Payment amount exceeds the outstanding invoice balance.")
+    payment = models.InvoicePayment(
+        invoice_id=invoice.id,
+        amount=amount,
+        paid_at=payload.paid_at or datetime.utcnow(),
+        reference=payload.reference,
+        method=payload.method,
+        notes=payload.notes,
+    )
+    allocation_payloads = payload.tax_allocations or [_default_payment_allocation(invoice, amount)]
+    payment.tax_allocations = [
+        models.PaymentTaxAllocation(
+            **(
+                allocation.model_dump()
+                if hasattr(allocation, "model_dump")
+                else allocation
+            )
+        )
+        for allocation in allocation_payloads
+    ]
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    db.refresh(invoice)
+    _refresh_invoice_payment_status(db, invoice)
+    return payment
+
+
+def delete_invoice_payment(db: Session, payment: models.InvoicePayment):
+    invoice = payment.invoice
+    db.delete(payment)
+    db.commit()
+    if invoice:
+        db.refresh(invoice)
+        _refresh_invoice_payment_status(db, invoice)
+
+
+def get_vat_summary(db: Session):
+    settings = get_or_create_settings(db)
+    accounting_method = settings.vat_accounting_method or "accrual"
+    invoices = db.query(models.Invoice).all()
+    expenses = db.query(models.Expense).all()
+    credit_notes = db.query(models.CreditNote).all()
+    refunds = db.query(models.Refund).all()
+    allocations = db.query(models.PaymentTaxAllocation).all()
+
+    output_vat = _round_money(sum(float(invoice.tax_amount or 0) for invoice in invoices))
+    input_vat = _round_money(
+        sum(float(expense.tax_amount or 0) for expense in expenses if expense.vat_reclaimable)
+    )
+    credit_note_vat = _round_money(sum(float(note.tax_amount or 0) for note in credit_notes))
+    refund_vat = _round_money(sum(float(refund.tax_amount or 0) for refund in refunds))
+    payment_allocated_vat = _round_money(sum(float(item.tax_amount or 0) for item in allocations))
+    net_vat_due = (
+        _round_money(payment_allocated_vat - input_vat)
+        if accounting_method == "cash"
+        else _round_money(output_vat - credit_note_vat - input_vat)
+    )
+    return {
+        "accounting_method": accounting_method,
+        "period_start": datetime(2000, settings.vat_period_start_month or 1, settings.vat_period_start_day or 1),
+        "next_due": settings.vat_next_filing_due,
+        "output_vat": output_vat,
+        "input_vat": input_vat,
+        "credit_note_vat": credit_note_vat,
+        "refund_vat": refund_vat,
+        "payment_allocated_vat": payment_allocated_vat,
+        "net_vat_due": net_vat_due,
+    }
+
+
+def get_corporation_tax_summary(db: Session):
+    settings = get_or_create_settings(db)
+    invoice_net = _round_money(sum(float(invoice.net_amount or invoice.amount or 0) for invoice in db.query(models.Invoice).all()))
+    credit_net = _round_money(sum(float(note.net_amount or 0) for note in db.query(models.CreditNote).all()))
+    expense_net = _round_money(sum(float(expense.net_amount or expense.amount or 0) for expense in db.query(models.Expense).all()))
+    estimated_profit = _round_money(invoice_net - credit_net - expense_net)
+    rate = float(settings.corporation_tax_rate or 25)
+    estimated_tax_due = _round_money(max(estimated_profit, 0) * (rate / 100))
+    return {
+        "period_start": datetime(
+            2000,
+            settings.corporation_tax_period_start_month or settings.fy_start_month or 1,
+            settings.corporation_tax_period_start_day or settings.fy_start_day or 1,
+        ),
+        "next_payment_due": settings.corporation_tax_payment_due,
+        "next_return_due": settings.corporation_tax_return_due,
+        "estimated_profit": estimated_profit,
+        "estimated_tax_due": estimated_tax_due,
+        "rate": rate,
+    }

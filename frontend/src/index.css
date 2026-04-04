@@ -92,3 +92,50 @@
     --sidebar-ring: var(--ring);
   }
 }
+
+.app-view-transition {
+  view-transition-name: app-view;
+}
+
+::view-transition-old(app-view),
+::view-transition-new(app-view) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::view-transition-old(app-view) {
+  animation-name: app-view-fade-out;
+}
+
+::view-transition-new(app-view) {
+  animation-name: app-view-fade-in;
+}
+
+@keyframes app-view-fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes app-view-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(app-view),
+  ::view-transition-new(app-view) {
+    animation-duration: 1ms;
+  }
+}
