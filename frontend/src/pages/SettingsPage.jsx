@@ -377,7 +377,7 @@ export default function SettingsPage({
               value={settings?.smtp_use_tls ? "true" : "false"}
               onValueChange={(value) => updateSettings({ smtp_use_tls: value === "true" })}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select" />
               </SelectTrigger>
               <SelectContent>
@@ -509,9 +509,9 @@ export default function SettingsPage({
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-foreground">Restore from server</p>
                     <Select value={selectedBackup} onValueChange={setSelectedBackup}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select backup file" />
-                      </SelectTrigger>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select backup file" />
+                    </SelectTrigger>
                       <SelectContent>
                         {backups.length === 0 && (
                           <SelectItem value="none" disabled>

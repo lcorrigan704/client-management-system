@@ -131,6 +131,7 @@ class InvoiceLineItem(Base):
     tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
     tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
     tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
+    tax_override: Mapped[bool] = mapped_column(Boolean, default=False)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="line_items")
     credit_note_line_items: Mapped[list["CreditNoteLineItem"]] = relationship(
@@ -239,6 +240,7 @@ class QuoteLineItem(Base):
     tax_code: Mapped[str | None] = mapped_column(String(50), default="standard")
     tax_kind: Mapped[str | None] = mapped_column(String(50), default="vat")
     tax_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
+    tax_override: Mapped[bool] = mapped_column(Boolean, default=False)
 
     quote: Mapped["Quote"] = relationship("Quote", back_populates="line_items")
 
@@ -674,9 +676,14 @@ class Settings(Base):
     bank_swift: Mapped[str | None] = mapped_column(String(100))
     bank_reference: Mapped[str | None] = mapped_column(String(200))
     vat_registered: Mapped[bool] = mapped_column(Boolean, default=False)
+    vat_registration_date: Mapped[datetime | None] = mapped_column(DateTime)
     vat_number: Mapped[str | None] = mapped_column(String(100))
+    utr: Mapped[str | None] = mapped_column(String(100))
+    company_number: Mapped[str | None] = mapped_column(String(50))
+    business_tax_mode: Mapped[str] = mapped_column(String(50), default="limited_company")
     vat_scheme: Mapped[str | None] = mapped_column(String(50), default="standard")
     default_vat_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=20)
+    default_vat_code: Mapped[str | None] = mapped_column(String(50), default="standard")
     vat_inclusive_default: Mapped[bool] = mapped_column(Boolean, default=False)
     vat_filing_frequency: Mapped[str | None] = mapped_column(String(50), default="quarterly")
     vat_period_start_month: Mapped[int] = mapped_column(Integer, default=1)
@@ -690,7 +697,29 @@ class Settings(Base):
     corporation_tax_period_start_day: Mapped[int] = mapped_column(Integer, default=1)
     corporation_tax_payment_due: Mapped[datetime | None] = mapped_column(DateTime)
     corporation_tax_return_due: Mapped[datetime | None] = mapped_column(DateTime)
+    tax_estimate_basis: Mapped[str] = mapped_column(String(50), default="accrual")
+    tax_policy_effective_date: Mapped[datetime | None] = mapped_column(DateTime)
+    tax_policy_last_reviewed: Mapped[datetime | None] = mapped_column(DateTime)
+    tax_policy_next_review_due: Mapped[datetime | None] = mapped_column(DateTime)
+    tax_policy_review_notes: Mapped[str | None] = mapped_column(Text())
     other_taxes: Mapped[list[dict] | None] = mapped_column(JSON, default=list)
+
+
+class TaxRateCatalog(Base):
+    __tablename__ = "tax_rate_catalogs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tax_year: Mapped[str] = mapped_column(String(20), nullable=False, default="2025-26", index=True)
+    version_label: Mapped[str] = mapped_column(String(100), nullable=False, default="HMRC baseline")
+    source_label: Mapped[str] = mapped_column(String(200), nullable=False, default="HMRC guidance")
+    effective_date: Mapped[datetime | None] = mapped_column(DateTime)
+    vat_rates: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    direct_tax_rates: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    assumptions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    review_notes: Mapped[str | None] = mapped_column(Text())
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class User(Base):

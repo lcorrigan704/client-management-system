@@ -42,6 +42,7 @@ const AgreementsPage = lazy(() => import("@/pages/AgreementsPage"));
 const ProposalsPage = lazy(() => import("@/pages/ProposalsPage"));
 const ExpensesPage = lazy(() => import("@/pages/ExpensesPage"));
 const EmailsPage = lazy(() => import("@/pages/EmailsPage"));
+const TaxPage = lazy(() => import("@/pages/TaxPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const UsersPage = lazy(() => import("@/pages/UsersPage"));
 
@@ -519,6 +520,13 @@ export default function App() {
           description: item.description,
           quantity: Number(item.quantity || 0),
           unit_amount: Number(item.unit_amount || 0),
+          tax_kind: item.tax_kind || "vat",
+          tax_code: item.tax_code || settings?.default_vat_code || "standard",
+          tax_rate: Number(item.tax_rate ?? settings?.default_vat_rate ?? 20),
+          tax_inclusive:
+            item.tax_inclusive === true ||
+            (item.tax_inclusive !== false && settings?.vat_inclusive_default === true),
+          tax_override: item.tax_override === true,
         })),
       };
 
@@ -558,6 +566,13 @@ export default function App() {
           description: item.description,
           quantity: Number(item.quantity || 0),
           unit_amount: Number(item.unit_amount || 0),
+          tax_kind: item.tax_kind || "vat",
+          tax_code: item.tax_code || settings?.default_vat_code || "standard",
+          tax_rate: Number(item.tax_rate ?? settings?.default_vat_rate ?? 20),
+          tax_inclusive:
+            item.tax_inclusive === true ||
+            (item.tax_inclusive !== false && settings?.vat_inclusive_default === true),
+          tax_override: item.tax_override === true,
         })),
       };
 
@@ -696,6 +711,13 @@ export default function App() {
         display_id: expenseForm.is_legacy ? expenseForm.display_id || null : null,
         is_legacy: expenseForm.is_legacy,
         user_id: expenseForm.user_id ? Number(expenseForm.user_id) : null,
+        tax_code: expenseForm.tax_code || settings?.default_vat_code || "standard",
+        tax_rate: Number(expenseForm.tax_rate ?? settings?.default_vat_rate ?? 20),
+        tax_kind: expenseForm.tax_kind || "vat",
+        tax_inclusive:
+          expenseForm.tax_inclusive === true ||
+          (expenseForm.tax_inclusive !== false && settings?.vat_inclusive_default === true),
+        vat_reclaimable: expenseForm.vat_reclaimable === true,
         receipts: expenseForm.receipts || [],
       };
       if (editingExpenseId) {
@@ -1352,6 +1374,15 @@ export default function App() {
                     description: item.description,
                     quantity: item.quantity,
                     unit_amount: item.unit_amount,
+                    tax_kind: item.tax_kind || "vat",
+                    tax_code: item.tax_code || settings?.default_vat_code || "standard",
+                    tax_rate:
+                      item.tax_rate ?? settings?.default_vat_rate ?? 20,
+                    tax_inclusive:
+                      item.tax_inclusive === true ||
+                      (item.tax_inclusive !== false &&
+                        settings?.vat_inclusive_default === true),
+                    tax_override: item.tax_override === true,
                   }))
                 : emptyInvoice.line_items,
           });
@@ -1373,6 +1404,9 @@ export default function App() {
       handleGeneratePdf,
       handleViewInvoiceAdjustments,
       openCreditNoteForInvoice,
+      settings?.default_vat_code,
+      settings?.default_vat_rate,
+      settings?.vat_inclusive_default,
     ]
   );
 
@@ -1397,6 +1431,15 @@ export default function App() {
                     description: item.description,
                     quantity: item.quantity,
                     unit_amount: item.unit_amount,
+                    tax_kind: item.tax_kind || "vat",
+                    tax_code: item.tax_code || settings?.default_vat_code || "standard",
+                    tax_rate:
+                      item.tax_rate ?? settings?.default_vat_rate ?? 20,
+                    tax_inclusive:
+                      item.tax_inclusive === true ||
+                      (item.tax_inclusive !== false &&
+                        settings?.vat_inclusive_default === true),
+                    tax_override: item.tax_override === true,
                   }))
                 : emptyQuote.line_items,
           });
@@ -1408,7 +1451,14 @@ export default function App() {
         onGeneratePdf: (id) => handleGeneratePdf("quote", id),
         onSendReminder: (id) => openEmailForEntity("quote", id, true),
       }),
-    [clientMap, handleDeleteQuote, handleGeneratePdf]
+    [
+      clientMap,
+      handleDeleteQuote,
+      handleGeneratePdf,
+      settings?.default_vat_code,
+      settings?.default_vat_rate,
+      settings?.vat_inclusive_default,
+    ]
   );
 
   const agreementColumns = useMemo(
@@ -1511,6 +1561,14 @@ export default function App() {
             is_legacy: Boolean(expense.is_legacy),
             title: expense.title,
             amount: expense.amount,
+            tax_code: expense.tax_code || settings?.default_vat_code || "standard",
+            tax_rate: expense.tax_rate ?? settings?.default_vat_rate ?? 20,
+            tax_kind: expense.tax_kind || "vat",
+            tax_inclusive:
+              expense.tax_inclusive === true ||
+              (expense.tax_inclusive !== false &&
+                settings?.vat_inclusive_default === true),
+            vat_reclaimable: expense.vat_reclaimable === true,
             incurred_date: expense.incurred_date ? parseISO(expense.incurred_date) : null,
             notes: expense.notes || "",
             receipts: expense.receipts || [],
@@ -1521,7 +1579,15 @@ export default function App() {
         onDelete: handleDeleteExpense,
         onGeneratePdf: (id) => handleGeneratePdf("expense", id),
       }),
-    [clientMap, userMap, handleDeleteExpense, handleGeneratePdf]
+    [
+      clientMap,
+      userMap,
+      handleDeleteExpense,
+      handleGeneratePdf,
+      settings?.default_vat_code,
+      settings?.default_vat_rate,
+      settings?.vat_inclusive_default,
+    ]
   );
 
   const userColumns = useMemo(
@@ -1623,6 +1689,7 @@ export default function App() {
             invoices={filteredInvoices}
             clients={clients}
             quotes={quotes}
+            settings={settings}
             invoiceColumns={invoiceColumns}
             invoiceDialogOpen={invoiceDialogOpen}
             setInvoiceDialogOpen={setInvoiceDialogOpen}
@@ -1642,6 +1709,7 @@ export default function App() {
           <QuotesPage
             quotes={filteredQuotes}
             clients={clients}
+            settings={settings}
             quoteColumns={quoteColumns}
             quoteDialogOpen={quoteDialogOpen}
             setQuoteDialogOpen={setQuoteDialogOpen}
@@ -1731,6 +1799,7 @@ export default function App() {
             expenses={filteredExpenses}
             clients={clients}
             users={assignableUsers}
+            settings={settings}
             expenseColumns={expenseColumns}
             expenseDialogOpen={expenseDialogOpen}
             setExpenseDialogOpen={setExpenseDialogOpen}
@@ -1760,6 +1829,15 @@ export default function App() {
             buildMailto={buildMailto}
             composeEntities={composeEntities}
             clients={clients}
+          />
+        )}
+        {view === VIEWS.TAX && canManageSettings && (
+          <TaxPage
+            settings={settings}
+            updateSettings={updateSettings}
+            onSaveSettings={saveSettings}
+            selectedYear={selectedYear}
+            formatFinancialYearLabel={formatFinancialYearLabel}
           />
         )}
         {view === VIEWS.SETTINGS && canManageSettings && (

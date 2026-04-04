@@ -44,7 +44,63 @@ def _build_line_item_model(model_cls, item: dict):
         tax_code=item.get("tax_code") or "standard",
         tax_kind=item.get("tax_kind") or "vat",
         tax_inclusive=tax_inclusive,
+        tax_override=bool(item.get("tax_override") or False),
     )
+
+
+def _apply_line_tax_defaults(item: dict, settings: models.Settings):
+    next_item = dict(item or {})
+    next_item.setdefault("tax_kind", "vat")
+    next_item.setdefault("tax_code", settings.default_vat_code or "standard")
+    if next_item.get("tax_rate") is None:
+        next_item["tax_rate"] = float(settings.default_vat_rate or 0)
+    next_item.setdefault("tax_inclusive", bool(settings.vat_inclusive_default))
+    next_item.setdefault("tax_override", False)
+    return next_item
+
+
+def _default_tax_rate_catalog_payload():
+    return {
+        "tax_year": "2025-26",
+        "version_label": "HMRC baseline",
+        "source_label": "HMRC guidance",
+        "vat_rates": [
+            {"code": "standard", "label": "Standard rate", "rate": 20.0, "kind": "vat", "reclaimable": True},
+            {"code": "reduced", "label": "Reduced rate", "rate": 5.0, "kind": "vat", "reclaimable": True},
+            {"code": "zero", "label": "Zero rate", "rate": 0.0, "kind": "vat", "reclaimable": True},
+            {"code": "exempt", "label": "Exempt", "rate": 0.0, "kind": "vat", "reclaimable": False},
+            {"code": "out_of_scope", "label": "Out of scope", "rate": 0.0, "kind": "vat", "reclaimable": False},
+            {"code": "reverse_charge", "label": "Reverse charge", "rate": 20.0, "kind": "vat", "reclaimable": True},
+        ],
+        "direct_tax_rates": {
+            "corporation_tax": {
+                "small_profits_rate": 19.0,
+                "main_rate": 25.0,
+                "small_profits_threshold": 50000.0,
+                "main_rate_threshold": 250000.0,
+                "marginal_relief_fraction": 0.015,
+            },
+            "sole_trader": {
+                "personal_allowance": 12570.0,
+                "basic_rate_limit": 50270.0,
+                "basic_rate": 0.20,
+                "higher_rate": 0.40,
+                "additional_rate": 0.45,
+                "additional_rate_threshold": 125140.0,
+                "class4_lower_profits_limit": 12570.0,
+                "class4_upper_profits_limit": 50270.0,
+                "class4_main_rate": 0.06,
+                "class4_upper_rate": 0.02,
+                "class2_small_profits_threshold": 6845.0,
+                "class2_weekly_rate": 3.50,
+            },
+        },
+        "assumptions": [
+            "UK rates seeded from HMRC guidance and should be reviewed annually.",
+            "Estimates are planning-only and not filing advice.",
+            "Reliefs, allowances, and special-case adjustments are not fully modeled in v1.5.",
+        ],
+    }
 
 
 def _apply_document_totals(document, line_items):
@@ -157,6 +213,15 @@ def get_or_create_settings(db: Session) -> models.Settings:
         if getattr(settings, "other_taxes", None) is None:
             settings.other_taxes = []
             changed = True
+        if not getattr(settings, "business_tax_mode", None):
+            settings.business_tax_mode = "limited_company"
+            changed = True
+        if not getattr(settings, "default_vat_code", None):
+            settings.default_vat_code = "standard"
+            changed = True
+        if not getattr(settings, "tax_estimate_basis", None):
+            settings.tax_estimate_basis = "accrual"
+            changed = True
         if changed:
             db.commit()
             db.refresh(settings)
@@ -179,6 +244,53 @@ def update_settings(db: Session, payload: schemas.SettingsUpdate) -> models.Sett
     db.commit()
     db.refresh(settings)
     return settings
+
+
+def get_or_create_tax_rate_catalog(db: Session) -> models.TaxRateCatalog:
+    active = (
+        db.query(models.TaxRateCatalog)
+        .filter(models.TaxRateCatalog.is_active == True)  # noqa: E712
+        .order_by(models.TaxRateCatalog.updated_at.desc(), models.TaxRateCatalog.id.desc())
+        .first()
+    )
+    if active:
+        return active
+
+    seed = _default_tax_rate_catalog_payload()
+    active = models.TaxRateCatalog(
+        tax_year=seed["tax_year"],
+        version_label=seed["version_label"],
+        source_label=seed["source_label"],
+        effective_date=datetime.utcnow(),
+        vat_rates=seed["vat_rates"],
+        direct_tax_rates=seed["direct_tax_rates"],
+        assumptions=seed["assumptions"],
+        review_notes="Seeded from HMRC baseline values.",
+        is_active=True,
+    )
+    db.add(active)
+    db.commit()
+    db.refresh(active)
+    return active
+
+
+def update_tax_rate_catalog(db: Session, payload: schemas.TaxRateCatalogUpdate) -> models.TaxRateCatalog:
+    catalog = get_or_create_tax_rate_catalog(db)
+    if payload.version:
+        version_data = payload.version.model_dump(exclude_unset=True)
+        for key in ("tax_year", "version_label", "source_label", "effective_date", "review_notes", "is_active"):
+            if key in version_data:
+                setattr(catalog, key, version_data[key])
+        if "assumptions" in version_data:
+            catalog.assumptions = version_data["assumptions"] or []
+    if payload.vat_rates is not None:
+        catalog.vat_rates = [item.model_dump() if hasattr(item, "model_dump") else item for item in payload.vat_rates]
+    if payload.direct_tax_rates is not None:
+        catalog.direct_tax_rates = payload.direct_tax_rates
+    catalog.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(catalog)
+    return catalog
 
 
 def _serialize_datetime(value):
@@ -457,9 +569,11 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
                     "tax_code": getattr(item, "tax_code", "standard"),
                     "tax_kind": getattr(item, "tax_kind", "vat"),
                     "tax_inclusive": bool(getattr(item, "tax_inclusive", False)),
+                    "tax_override": bool(getattr(item, "tax_override", False)),
                 }
                 for item in quote.line_items
             ]
+    settings = get_or_create_settings(db)
 
     def add_months(base_date: datetime, months: int, day_override: int | None = None) -> datetime:
         import calendar
@@ -497,15 +611,18 @@ def create_invoice(db: Session, client_id: int, payload: schemas.InvoiceCreate):
         db.commit()
         db.refresh(invoice)
         if line_items:
+            normalized_line_items = [
+                _apply_line_tax_defaults(item, settings)
+                for item in line_items
+            ]
             invoice.line_items = [
                 _build_line_item_model(models.InvoiceLineItem, item)
-                for item in line_items
+                for item in normalized_line_items
             ]
             _apply_document_totals(invoice, invoice.line_items)
             db.commit()
             db.refresh(invoice)
         if not invoice.display_id:
-            settings = get_or_create_settings(db)
             chosen_display_id = display_id_override or display_id
             if chosen_display_id:
                 ensure_display_id_unique(db, models.Invoice, chosen_display_id)
@@ -612,9 +729,14 @@ def update_invoice(db: Session, invoice: models.Invoice, payload: schemas.Invoic
     for field, value in data.items():
         setattr(invoice, field, value)
     if line_items is not None:
+        settings = get_or_create_settings(db)
+        normalized_line_items = [
+            _apply_line_tax_defaults(item, settings)
+            for item in line_items
+        ]
         invoice.line_items = [
             _build_line_item_model(models.InvoiceLineItem, item)
-            for item in line_items
+            for item in normalized_line_items
         ]
         _apply_document_totals(invoice, invoice.line_items)
     db.commit()
@@ -848,9 +970,13 @@ def create_quote(db: Session, client_id: int, payload: schemas.QuoteCreate):
     db.refresh(quote)
     settings = get_or_create_settings(db)
     if line_items:
+        normalized_line_items = [
+            _apply_line_tax_defaults(item, settings)
+            for item in line_items
+        ]
         quote.line_items = [
             _build_line_item_model(models.QuoteLineItem, item)
-            for item in line_items
+            for item in normalized_line_items
         ]
         _apply_document_totals(quote, quote.line_items)
         db.commit()
@@ -885,9 +1011,14 @@ def update_quote(db: Session, quote: models.Quote, payload: schemas.QuoteUpdate)
     for field, value in data.items():
         setattr(quote, field, value)
     if line_items is not None:
+        settings = get_or_create_settings(db)
+        normalized_line_items = [
+            _apply_line_tax_defaults(item, settings)
+            for item in line_items
+        ]
         quote.line_items = [
             _build_line_item_model(models.QuoteLineItem, item)
-            for item in line_items
+            for item in normalized_line_items
         ]
         _apply_document_totals(quote, quote.line_items)
     db.commit()
@@ -1215,14 +1346,83 @@ def delete_invoice_payment(db: Session, payment: models.InvoicePayment):
         _refresh_invoice_payment_status(db, invoice)
 
 
-def get_vat_summary(db: Session):
+def _coerce_period(period: str | None):
+    return (period or "all").strip().lower()
+
+
+def _period_bounds(period: str, settings: models.Settings):
+    today = datetime.utcnow()
+    if period == "all":
+        return None, None
+
+    if period.startswith("fy_"):
+        try:
+            fy_year = int(period.split("_", 1)[1])
+        except (TypeError, ValueError):
+            fy_year = today.year
+        fy_month = settings.fy_start_month or 1
+        fy_day = settings.fy_start_day or 1
+        fy_start = datetime(fy_year, fy_month, fy_day)
+        fy_end = datetime(fy_year + 1, fy_month, fy_day) - timedelta(seconds=1)
+        return fy_start, fy_end
+
+    if period == "current_tax_year":
+        tax_year_start = datetime(today.year, 4, 6)
+        if today < tax_year_start:
+            tax_year_start = datetime(today.year - 1, 4, 6)
+        tax_year_end = datetime(tax_year_start.year + 1, 4, 5, 23, 59, 59)
+        return tax_year_start, tax_year_end
+
+    fy_month = settings.fy_start_month or 1
+    fy_day = settings.fy_start_day or 1
+    fy_start = datetime(today.year, fy_month, fy_day)
+    if today < fy_start:
+        fy_start = datetime(today.year - 1, fy_month, fy_day)
+    fy_end = datetime(fy_start.year + 1, fy_month, fy_day) - timedelta(seconds=1)
+    return fy_start, fy_end
+
+
+def _in_period(value: datetime | None, start: datetime | None, end: datetime | None):
+    if not value:
+        return False if (start or end) else True
+    if start and value < start:
+        return False
+    if end and value > end:
+        return False
+    return True
+
+
+def _build_tax_assumptions(db: Session, warnings: list[str] | None = None):
+    catalog = get_or_create_tax_rate_catalog(db)
+    return {
+        "tax_year": catalog.tax_year,
+        "source_label": catalog.source_label,
+        "version_label": catalog.version_label,
+        "generated_at": datetime.utcnow(),
+        "warnings": warnings or [],
+    }
+
+
+def get_vat_summary(db: Session, period: str | None = None):
     settings = get_or_create_settings(db)
     accounting_method = settings.vat_accounting_method or "accrual"
-    invoices = db.query(models.Invoice).all()
-    expenses = db.query(models.Expense).all()
-    credit_notes = db.query(models.CreditNote).all()
-    refunds = db.query(models.Refund).all()
-    allocations = db.query(models.PaymentTaxAllocation).all()
+    normalized_period = _coerce_period(period)
+    period_start, period_end = _period_bounds(normalized_period, settings)
+    qualifying_statuses = {"sent", "paid", "overdue"}
+    invoices = [
+        item
+        for item in db.query(models.Invoice).all()
+        if _in_period(item.issued_at, period_start, period_end)
+        and str(item.status or "").lower() in qualifying_statuses
+    ]
+    expenses = [item for item in db.query(models.Expense).all() if _in_period(item.incurred_date, period_start, period_end)]
+    credit_notes = [item for item in db.query(models.CreditNote).all() if _in_period(item.issued_at, period_start, period_end)]
+    refunds = [item for item in db.query(models.Refund).all() if _in_period(item.refunded_at, period_start, period_end)]
+    allocations = [
+        item
+        for item in db.query(models.PaymentTaxAllocation).all()
+        if _in_period(getattr(item.payment, "paid_at", None), period_start, period_end)
+    ]
 
     output_vat = _round_money(sum(float(invoice.tax_amount or 0) for invoice in invoices))
     input_vat = _round_money(
@@ -1237,8 +1437,10 @@ def get_vat_summary(db: Session):
         else _round_money(output_vat - credit_note_vat - input_vat)
     )
     return {
+        "tax_kind": "vat",
         "accounting_method": accounting_method,
-        "period_start": datetime(2000, settings.vat_period_start_month or 1, settings.vat_period_start_day or 1),
+        "period_start": period_start,
+        "period_end": period_end,
         "next_due": settings.vat_next_filing_due,
         "output_vat": output_vat,
         "input_vat": input_vat,
@@ -1249,23 +1451,188 @@ def get_vat_summary(db: Session):
     }
 
 
-def get_corporation_tax_summary(db: Session):
+def _calculate_profit(db: Session, period: str | None = None):
     settings = get_or_create_settings(db)
-    invoice_net = _round_money(sum(float(invoice.net_amount or invoice.amount or 0) for invoice in db.query(models.Invoice).all()))
-    credit_net = _round_money(sum(float(note.net_amount or 0) for note in db.query(models.CreditNote).all()))
-    expense_net = _round_money(sum(float(expense.net_amount or expense.amount or 0) for expense in db.query(models.Expense).all()))
-    estimated_profit = _round_money(invoice_net - credit_net - expense_net)
-    rate = float(settings.corporation_tax_rate or 25)
-    estimated_tax_due = _round_money(max(estimated_profit, 0) * (rate / 100))
+    period_start, period_end = _period_bounds(_coerce_period(period), settings)
+    qualifying_statuses = {"sent", "paid", "overdue"}
+    invoices = [
+        item
+        for item in db.query(models.Invoice).all()
+        if _in_period(item.issued_at, period_start, period_end)
+        and str(item.status or "").lower() in qualifying_statuses
+    ]
+    credit_notes = [item for item in db.query(models.CreditNote).all() if _in_period(item.issued_at, period_start, period_end)]
+    refunds = [item for item in db.query(models.Refund).all() if _in_period(item.refunded_at, period_start, period_end)]
+    expenses = [item for item in db.query(models.Expense).all() if _in_period(item.incurred_date, period_start, period_end)]
+
+    invoice_gross = _round_money(
+        sum(float(invoice.gross_amount or invoice.amount or 0) for invoice in invoices)
+    )
+    credit_gross = _round_money(
+        sum(float(note.gross_amount or note.total_amount or 0) for note in credit_notes)
+    )
+    refund_gross = _round_money(
+        sum(float(refund.gross_amount or refund.amount or 0) for refund in refunds)
+    )
+    expense_gross = _round_money(
+        sum(float(expense.gross_amount or expense.amount or 0) for expense in expenses)
+    )
+    estimated_profit_gross = _round_money(
+        invoice_gross - credit_gross - refund_gross - expense_gross
+    )
+
+    invoice_net = _round_money(
+        sum(float(invoice.net_amount or invoice.amount or 0) for invoice in invoices)
+    )
+    credit_net = _round_money(sum(float(note.net_amount or 0) for note in credit_notes))
+    refund_net = _round_money(sum(float(refund.net_amount or 0) for refund in refunds))
+    expense_net = _round_money(
+        sum(float(expense.net_amount or expense.amount or 0) for expense in expenses)
+    )
+    estimated_profit_net = _round_money(
+        invoice_net - credit_net - refund_net - expense_net
+    )
+
+    return (
+        {
+            "invoice_gross": invoice_gross,
+            "credit_note_gross": credit_gross,
+            "refund_gross": refund_gross,
+            "expense_gross": expense_gross,
+            "estimated_profit_gross": estimated_profit_gross,
+            "invoice_net": invoice_net,
+            "credit_note_net": credit_net,
+            "refund_net": refund_net,
+            "expense_net": expense_net,
+            "estimated_profit_net": estimated_profit_net,
+        },
+        period_start,
+        period_end,
+    )
+
+
+def get_corporation_tax_summary(db: Session, period: str | None = None):
+    settings = get_or_create_settings(db)
+    catalog = get_or_create_tax_rate_catalog(db)
+    corp_rates = (catalog.direct_tax_rates or {}).get("corporation_tax", {})
+    profit_breakdown, period_start, period_end = _calculate_profit(db, period=period)
+    small_rate = float(corp_rates.get("small_profits_rate", 19))
+    main_rate = float(corp_rates.get("main_rate", settings.corporation_tax_rate or 25))
+    lower = float(corp_rates.get("small_profits_threshold", 50000))
+    upper = float(corp_rates.get("main_rate_threshold", 250000))
+
+    estimated_profit = _round_money(float(profit_breakdown.get("estimated_profit_gross", 0)))
+    taxable_profit = max(estimated_profit, 0)
+    if taxable_profit <= lower:
+        effective_rate = small_rate
+    elif taxable_profit >= upper:
+        effective_rate = main_rate
+    else:
+        effective_rate = _round_money(small_rate + ((taxable_profit - lower) / max(upper - lower, 1)) * (main_rate - small_rate))
+    estimated_tax_due = _round_money(taxable_profit * (effective_rate / 100))
     return {
-        "period_start": datetime(
-            2000,
-            settings.corporation_tax_period_start_month or settings.fy_start_month or 1,
-            settings.corporation_tax_period_start_day or settings.fy_start_day or 1,
-        ),
+        "tax_kind": "corporation_tax",
+        "period_start": period_start,
+        "period_end": period_end,
         "next_payment_due": settings.corporation_tax_payment_due,
         "next_return_due": settings.corporation_tax_return_due,
         "estimated_profit": estimated_profit,
         "estimated_tax_due": estimated_tax_due,
-        "rate": rate,
+        "rate": effective_rate,
+        "profit_breakdown": profit_breakdown,
+    }
+
+
+def get_sole_trader_tax_summary(db: Session, period: str | None = None):
+    catalog = get_or_create_tax_rate_catalog(db)
+    rates = (catalog.direct_tax_rates or {}).get("sole_trader", {})
+    profit_breakdown, period_start, period_end = _calculate_profit(db, period=period)
+    estimated_profit = _round_money(float(profit_breakdown.get("estimated_profit_gross", 0)))
+    taxable_profit = max(0.0, _round_money(estimated_profit - float(rates.get("personal_allowance", 12570))))
+
+    basic_limit = float(rates.get("basic_rate_limit", 50270))
+    basic_rate = float(rates.get("basic_rate", 0.20))
+    higher_rate = float(rates.get("higher_rate", 0.40))
+    additional_rate = float(rates.get("additional_rate", 0.45))
+    additional_threshold = float(rates.get("additional_rate_threshold", 125140))
+    class4_lower = float(rates.get("class4_lower_profits_limit", 12570))
+    class4_upper = float(rates.get("class4_upper_profits_limit", 50270))
+    class4_main_rate = float(rates.get("class4_main_rate", 0.06))
+    class4_upper_rate = float(rates.get("class4_upper_rate", 0.02))
+
+    income_tax = 0.0
+    gross_profit = max(estimated_profit, 0)
+    if gross_profit > additional_threshold:
+        income_tax += max(0.0, additional_threshold - basic_limit) * higher_rate
+        income_tax += max(0.0, basic_limit - float(rates.get("personal_allowance", 12570))) * basic_rate
+        income_tax += max(0.0, gross_profit - additional_threshold) * additional_rate
+    elif gross_profit > basic_limit:
+        income_tax += max(0.0, basic_limit - float(rates.get("personal_allowance", 12570))) * basic_rate
+        income_tax += max(0.0, gross_profit - basic_limit) * higher_rate
+    else:
+        income_tax += taxable_profit * basic_rate
+
+    class4_nic = 0.0
+    if gross_profit > class4_lower:
+        class4_nic += max(0.0, min(gross_profit, class4_upper) - class4_lower) * class4_main_rate
+    if gross_profit > class4_upper:
+        class4_nic += (gross_profit - class4_upper) * class4_upper_rate
+
+    return {
+        "tax_kind": "sole_trader_tax",
+        "period_start": period_start,
+        "period_end": period_end,
+        "estimated_profit": _round_money(estimated_profit),
+        "taxable_profit": _round_money(taxable_profit),
+        "estimated_income_tax_due": _round_money(income_tax),
+        "estimated_class4_nic_due": _round_money(class4_nic),
+        "class2_small_profits_threshold": float(rates.get("class2_small_profits_threshold", 6845)),
+        "class2_weekly_rate": float(rates.get("class2_weekly_rate", 3.50)),
+        "assumptions": [
+            "Estimate excludes personal allowances beyond configured defaults.",
+            "No student loan, pension, or special relief adjustments are included.",
+        ],
+        "profit_breakdown": profit_breakdown,
+    }
+
+
+def get_direct_tax_summary(db: Session, period: str | None = None):
+    settings = get_or_create_settings(db)
+    mode = settings.business_tax_mode or "limited_company"
+    basis = settings.tax_estimate_basis or "accrual"
+    warnings = [
+        "Estimates are for planning only and should be reviewed with an accountant.",
+        "Direct-tax estimate currently uses gross profit (gross income less gross credits/refunds/expenses).",
+    ]
+    assumptions = _build_tax_assumptions(db, warnings=warnings)
+    result = {
+        "mode": mode,
+        "basis": basis,
+        "assumptions": assumptions,
+        "corporation": None,
+        "sole_trader": None,
+    }
+    if mode == "sole_trader":
+        result["sole_trader"] = get_sole_trader_tax_summary(db, period=period)
+    else:
+        result["corporation"] = get_corporation_tax_summary(db, period=period)
+    return result
+
+
+def get_filing_pack(db: Session, period: str | None = None):
+    settings = get_or_create_settings(db)
+    vat_summary = get_vat_summary(db, period=period)
+    direct_summary = get_direct_tax_summary(db, period=period)
+    assumptions = _build_tax_assumptions(
+        db,
+        warnings=["Not tax advice. Confirm calculations with a qualified accountant before filing."],
+    )
+    return {
+        "period_start": vat_summary.get("period_start"),
+        "period_end": vat_summary.get("period_end"),
+        "basis": settings.tax_estimate_basis or "accrual",
+        "mode": settings.business_tax_mode or "limited_company",
+        "vat_summary": vat_summary,
+        "direct_tax_summary": direct_summary,
+        "assumptions": assumptions,
     }

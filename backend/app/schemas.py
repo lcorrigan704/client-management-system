@@ -71,6 +71,7 @@ class LineItemBase(BaseModel):
     tax_code: Optional[str] = "standard"
     tax_kind: Optional[str] = "vat"
     tax_inclusive: bool = False
+    tax_override: bool = False
 
 
 class LineItemOut(LineItemBase):
@@ -601,6 +602,7 @@ class VatSummaryOut(BaseModel):
     tax_kind: str = "vat"
     accounting_method: str
     period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
     next_due: Optional[datetime] = None
     output_vat: float
     input_vat: float
@@ -610,14 +612,102 @@ class VatSummaryOut(BaseModel):
     net_vat_due: float
 
 
+class TaxProfitBreakdownOut(BaseModel):
+    invoice_gross: float
+    credit_note_gross: float
+    refund_gross: float
+    expense_gross: float
+    estimated_profit_gross: float
+    invoice_net: float
+    credit_note_net: float
+    refund_net: float
+    expense_net: float
+    estimated_profit_net: float
+
+
 class CorporationTaxSummaryOut(BaseModel):
     tax_kind: str = "corporation_tax"
     period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
     next_payment_due: Optional[datetime] = None
     next_return_due: Optional[datetime] = None
     estimated_profit: float
     estimated_tax_due: float
     rate: float
+    profit_breakdown: Optional[TaxProfitBreakdownOut] = None
+
+
+class SoleTraderTaxSummaryOut(BaseModel):
+    tax_kind: str = "sole_trader_tax"
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    estimated_profit: float
+    taxable_profit: float
+    estimated_income_tax_due: float
+    estimated_class4_nic_due: float
+    class2_small_profits_threshold: float
+    class2_weekly_rate: float
+    assumptions: list[str] = Field(default_factory=list)
+    profit_breakdown: Optional[TaxProfitBreakdownOut] = None
+
+
+class TaxAssumptions(BaseModel):
+    tax_year: str
+    source_label: str
+    version_label: str
+    generated_at: datetime
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DirectTaxSummaryOut(BaseModel):
+    mode: str
+    basis: str
+    assumptions: TaxAssumptions
+    corporation: Optional[CorporationTaxSummaryOut] = None
+    sole_trader: Optional[SoleTraderTaxSummaryOut] = None
+
+
+class VatCodeRule(BaseModel):
+    code: str
+    label: str
+    rate: float
+    kind: str = "vat"
+    reclaimable: bool = True
+
+
+class TaxRateVersion(BaseModel):
+    id: Optional[int] = None
+    tax_year: str = "2025-26"
+    version_label: str = "HMRC baseline"
+    source_label: str = "HMRC guidance"
+    effective_date: Optional[datetime] = None
+    assumptions: list[str] = Field(default_factory=list)
+    review_notes: Optional[str] = None
+    is_active: bool = True
+    updated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class TaxRateCatalog(BaseModel):
+    version: TaxRateVersion
+    vat_rates: list[VatCodeRule] = Field(default_factory=list)
+    direct_tax_rates: dict = Field(default_factory=dict)
+
+
+class TaxRateCatalogUpdate(BaseModel):
+    version: Optional[TaxRateVersion] = None
+    vat_rates: Optional[list[VatCodeRule]] = None
+    direct_tax_rates: Optional[dict] = None
+
+
+class FilingPackResponse(BaseModel):
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    basis: str
+    mode: str
+    vat_summary: VatSummaryOut
+    direct_tax_summary: DirectTaxSummaryOut
+    assumptions: TaxAssumptions
 
 
 class EmailDraftRequest(BaseModel):
@@ -774,9 +864,14 @@ class AuthSetupRequest(BaseModel):
     bank_swift: str | None = None
     bank_reference: str | None = None
     vat_registered: bool | None = None
+    vat_registration_date: datetime | None = None
     vat_number: str | None = None
+    utr: str | None = None
+    company_number: str | None = None
+    business_tax_mode: str | None = None
     vat_scheme: str | None = None
     default_vat_rate: float | None = None
+    default_vat_code: str | None = None
     vat_inclusive_default: bool | None = None
     vat_filing_frequency: str | None = None
     vat_period_start_month: int | None = None
@@ -790,6 +885,11 @@ class AuthSetupRequest(BaseModel):
     corporation_tax_period_start_day: int | None = None
     corporation_tax_payment_due: datetime | None = None
     corporation_tax_return_due: datetime | None = None
+    tax_estimate_basis: str | None = None
+    tax_policy_effective_date: datetime | None = None
+    tax_policy_last_reviewed: datetime | None = None
+    tax_policy_next_review_due: datetime | None = None
+    tax_policy_review_notes: str | None = None
     other_taxes: list[dict] | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
@@ -886,9 +986,14 @@ class SettingsBase(BaseModel):
     bank_swift: Optional[str] = None
     bank_reference: Optional[str] = None
     vat_registered: bool = False
+    vat_registration_date: Optional[datetime] = None
     vat_number: Optional[str] = None
+    utr: Optional[str] = None
+    company_number: Optional[str] = None
+    business_tax_mode: str = "limited_company"
     vat_scheme: Optional[str] = None
     default_vat_rate: float = 20
+    default_vat_code: Optional[str] = "standard"
     vat_inclusive_default: bool = False
     vat_filing_frequency: Optional[str] = None
     vat_period_start_month: int = 1
@@ -902,6 +1007,11 @@ class SettingsBase(BaseModel):
     corporation_tax_period_start_day: int = 1
     corporation_tax_payment_due: Optional[datetime] = None
     corporation_tax_return_due: Optional[datetime] = None
+    tax_estimate_basis: str = "accrual"
+    tax_policy_effective_date: Optional[datetime] = None
+    tax_policy_last_reviewed: Optional[datetime] = None
+    tax_policy_next_review_due: Optional[datetime] = None
+    tax_policy_review_notes: Optional[str] = None
     other_taxes: list[dict] = []
 
 
@@ -946,9 +1056,14 @@ class SettingsUpdate(BaseModel):
     bank_swift: str | None = None
     bank_reference: str | None = None
     vat_registered: bool | None = None
+    vat_registration_date: datetime | None = None
     vat_number: str | None = None
+    utr: str | None = None
+    company_number: str | None = None
+    business_tax_mode: str | None = None
     vat_scheme: str | None = None
     default_vat_rate: float | None = None
+    default_vat_code: str | None = None
     vat_inclusive_default: bool | None = None
     vat_filing_frequency: str | None = None
     vat_period_start_month: int | None = None
@@ -962,4 +1077,9 @@ class SettingsUpdate(BaseModel):
     corporation_tax_period_start_day: int | None = None
     corporation_tax_payment_due: datetime | None = None
     corporation_tax_return_due: datetime | None = None
+    tax_estimate_basis: str | None = None
+    tax_policy_effective_date: datetime | None = None
+    tax_policy_last_reviewed: datetime | None = None
+    tax_policy_next_review_due: datetime | None = None
+    tax_policy_review_notes: str | None = None
     other_taxes: list[dict] | None = None

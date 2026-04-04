@@ -43,7 +43,7 @@ const useYearFilter = ({
       const year = getFiscalYear(dateValue);
       if (year) years.add(year);
     };
-    invoices.forEach((invoice) => addYear(invoice.due_date));
+    invoices.forEach((invoice) => addYear(invoice.issued_at || invoice.due_date));
     quotes.forEach((quote) => addYear(quote.valid_until));
     creditNotes.forEach((creditNote) => addYear(creditNote.issued_at));
     refunds.forEach((refund) => addYear(refund.refunded_at));
@@ -81,7 +81,7 @@ const useYearFilter = ({
     [clients, selectedYear]
   );
   const filteredInvoices = useMemo(
-    () => invoices.filter((invoice) => yearMatches(invoice.due_date || invoice.issued_at)),
+    () => invoices.filter((invoice) => yearMatches(invoice.issued_at || invoice.due_date)),
     [invoices, selectedYear]
   );
   const filteredQuotes = useMemo(
@@ -127,12 +127,16 @@ const useYearFilter = ({
       .reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
     const totalInvoiced = invoices
       .filter((invoice) =>
-        yearMatches(invoice.due_date) &&
+        yearMatches(invoice.issued_at || invoice.due_date) &&
         ["sent", "paid", "overdue"].includes(String(invoice.status || "").toLowerCase())
       )
       .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0) - totalCredited;
     const totalPaid = invoices
-      .filter((invoice) => (invoice.status === "paid" ? yearMatches(invoice.due_date) : false))
+      .filter((invoice) =>
+        invoice.status === "paid"
+          ? yearMatches(invoice.issued_at || invoice.due_date)
+          : false
+      )
       .reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0) - totalRefunded;
 
     return { totalQuoted, totalCredited, totalRefunded, totalInvoiced, totalPaid };
