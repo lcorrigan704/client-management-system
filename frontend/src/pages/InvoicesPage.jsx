@@ -7,7 +7,9 @@ import { DataTable } from "@/components/data-table";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import LineItemsEditorDialog from "@/components/line-items-editor-dialog";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
 import { formatGBP, formatDate } from "@/utils/format";
 
@@ -28,8 +30,10 @@ export default function InvoicesPage({
   onBulkSendReminder,
   onBulkCompose,
   emptyInvoice,
+  settings,
 }) {
   const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
+  const showVatControls = Boolean(settings?.vat_registered);
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const quoteMap = new Map(quotes.map((quote) => [quote.id, quote]));
   const clientQuotes = quotes.filter(
@@ -186,13 +190,13 @@ export default function InvoicesPage({
       </Card>
 
       <Dialog open={invoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>{editingInvoiceId ? "Edit invoice" : "New invoice"}</DialogTitle>
             <DialogDescription>Attach invoices to clients.</DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={handleInvoiceSubmit}>
-            <div className={gridTwo}>
+          <form className="min-w-0 space-y-4" onSubmit={handleInvoiceSubmit}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Client</label>
                 <Select
@@ -200,7 +204,7 @@ export default function InvoicesPage({
                   onValueChange={(value) => setInvoiceForm({ ...invoiceForm, client_id: value })}
                   disabled={editingInvoiceId}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select client" />
                   </SelectTrigger>
                   <SelectContent>
@@ -227,6 +231,11 @@ export default function InvoicesPage({
                             description: item.description,
                             quantity: item.quantity,
                             unit_amount: item.unit_amount,
+                            tax_kind: item.tax_kind || "vat",
+                            tax_code: item.tax_code || "standard",
+                            tax_rate: item.tax_rate ?? 20,
+                            tax_inclusive: item.tax_inclusive === true,
+                            tax_override: item.tax_override === true,
                           }))
                         : emptyInvoice.line_items;
                     setInvoiceForm({
@@ -237,7 +246,7 @@ export default function InvoicesPage({
                   }}
                   disabled={!invoiceForm.client_id}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select quote" />
                   </SelectTrigger>
                   <SelectContent>
@@ -251,7 +260,7 @@ export default function InvoicesPage({
                 </Select>
               </div>
             </div>
-            <div className={gridTwo}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Title</label>
                 <Input
@@ -266,7 +275,7 @@ export default function InvoicesPage({
                   value={invoiceForm.status}
                   onValueChange={(value) => setInvoiceForm({ ...invoiceForm, status: value })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -298,11 +307,10 @@ export default function InvoicesPage({
               <label className={labelClass}>Recurring schedule</label>
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={invoiceForm.recurrence_enabled}
-                    onChange={(event) => {
-                      const enabled = event.target.checked;
+                    onCheckedChange={(value) => {
+                      const enabled = value === true;
                       setInvoiceForm({ ...invoiceForm, recurrence_enabled: enabled });
                       if (enabled) {
                         setRecurringDialogOpen(true);
@@ -358,7 +366,7 @@ export default function InvoicesPage({
                           setInvoiceForm({ ...invoiceForm, recurrence_frequency: value })
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder="Select frequency" />
                         </SelectTrigger>
                         <SelectContent>
@@ -408,7 +416,7 @@ export default function InvoicesPage({
                           setInvoiceForm({ ...invoiceForm, due_rule_unit: value })
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder="Select unit" />
                         </SelectTrigger>
                         <SelectContent>
@@ -441,15 +449,14 @@ export default function InvoicesPage({
                 </DialogContent>
               </Dialog>
             </div>
-            <div className={gridTwo}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Use custom ID</label>
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={invoiceForm.is_legacy}
-                    onChange={(event) =>
-                      setInvoiceForm({ ...invoiceForm, is_legacy: event.target.checked })
+                    onCheckedChange={(value) =>
+                      setInvoiceForm({ ...invoiceForm, is_legacy: value === true })
                     }
                     disabled={invoiceForm.recurrence_enabled}
                   />
@@ -475,70 +482,40 @@ export default function InvoicesPage({
             </div>
             <div className={fieldClass}>
               <label className={labelClass}>Line items</label>
-              <div className="space-y-2">
-                {invoiceForm.line_items.map((item, index) => (
-                  <div key={index} className="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto]">
-                    <Input
-                      placeholder="Description"
-                      value={item.description}
-                      onChange={(event) => {
-                        const next = [...invoiceForm.line_items];
-                        next[index] = { ...item, description: event.target.value };
-                        setInvoiceForm({ ...invoiceForm, line_items: next });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Qty"
-                      value={item.quantity}
-                      onChange={(event) => {
-                        const next = [...invoiceForm.line_items];
-                        next[index] = { ...item, quantity: event.target.value };
-                        setInvoiceForm({ ...invoiceForm, line_items: next });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Unit amount"
-                      value={item.unit_amount}
-                      onChange={(event) => {
-                        const next = [...invoiceForm.line_items];
-                        next[index] = { ...item, unit_amount: event.target.value };
-                        setInvoiceForm({ ...invoiceForm, line_items: next });
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        const next = invoiceForm.line_items.filter((_, i) => i !== index);
-                        setInvoiceForm({
-                          ...invoiceForm,
-                          line_items: next.length ? next : emptyInvoice.line_items,
-                        });
-                      }}
-                    >
-                      Remove
-                    </Button>
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {invoiceForm.line_items.length} item
+                    {invoiceForm.line_items.length === 1 ? "" : "s"} · Subtotal{" "}
+                    {formatGBP(
+                      invoiceForm.line_items.reduce(
+                        (sum, item) =>
+                          sum + Number(item.quantity || 0) * Number(item.unit_amount || 0),
+                        0
+                      )
+                    )}
                   </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    setInvoiceForm({
-                      ...invoiceForm,
-                      line_items: [
-                        ...invoiceForm.line_items,
-                        { description: "", quantity: 1, unit_amount: "" },
-                      ],
-                    })
-                  }
-                >
-                  Add line item
-                </Button>
+                  <LineItemsEditorDialog
+                    title="Edit invoice line items"
+                    lineItems={invoiceForm.line_items}
+                    onChange={(nextLineItems) =>
+                      setInvoiceForm({ ...invoiceForm, line_items: nextLineItems })
+                    }
+                    emptyLineItem={emptyInvoice.line_items[0]}
+                    showVatControls={showVatControls}
+                  />
+                </div>
+                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {invoiceForm.line_items.slice(0, 3).map((item, idx) => (
+                    <p key={`${item.description}-${idx}`} className="break-words">
+                      {item.description || "Untitled line"} · {Number(item.quantity || 0)} ×{" "}
+                      {formatGBP(item.unit_amount)}
+                    </p>
+                  ))}
+                  {invoiceForm.line_items.length > 3 ? (
+                    <p>+{invoiceForm.line_items.length - 3} more line items</p>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className={fieldClass}>

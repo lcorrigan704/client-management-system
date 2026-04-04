@@ -19,6 +19,7 @@ from .db import Base, engine, get_db, SessionLocal
 from .email_utils import generate_email_draft, send_email_smtp, test_smtp_connection
 from base64 import b64encode, b64decode
 from .security import password_meets_policy, verify_password
+from weasyprint import HTML
 
 
 app = FastAPI(
@@ -662,14 +663,143 @@ def list_refunds(db: Session = Depends(get_db), user=Depends(require_user)):
     return crud.get_refunds(db)
 
 
+@app.get("/tax/rates", response_model=schemas.TaxRateCatalog)
+def get_tax_rates(db: Session = Depends(get_db), user=Depends(require_user)):
+    catalog = crud.get_or_create_tax_rate_catalog(db)
+    return schemas.TaxRateCatalog(
+        version=schemas.TaxRateVersion(
+            id=catalog.id,
+            tax_year=catalog.tax_year,
+            version_label=catalog.version_label,
+            source_label=catalog.source_label,
+            effective_date=catalog.effective_date,
+            assumptions=catalog.assumptions or [],
+            review_notes=catalog.review_notes,
+            is_active=catalog.is_active,
+            updated_at=catalog.updated_at,
+            created_at=catalog.created_at,
+        ),
+        vat_rates=[schemas.VatCodeRule(**item) for item in (catalog.vat_rates or [])],
+        direct_tax_rates=catalog.direct_tax_rates or {},
+    )
+
+
+@app.put("/tax/rates", response_model=schemas.TaxRateCatalog)
+def update_tax_rates(
+    payload: schemas.TaxRateCatalogUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["admin", "owner"])),
+):
+    catalog = crud.update_tax_rate_catalog(db, payload)
+    return schemas.TaxRateCatalog(
+        version=schemas.TaxRateVersion(
+            id=catalog.id,
+            tax_year=catalog.tax_year,
+            version_label=catalog.version_label,
+            source_label=catalog.source_label,
+            effective_date=catalog.effective_date,
+            assumptions=catalog.assumptions or [],
+            review_notes=catalog.review_notes,
+            is_active=catalog.is_active,
+            updated_at=catalog.updated_at,
+            created_at=catalog.created_at,
+        ),
+        vat_rates=[schemas.VatCodeRule(**item) for item in (catalog.vat_rates or [])],
+        direct_tax_rates=catalog.direct_tax_rates or {},
+    )
+
+
 @app.get("/tax/vat-summary", response_model=schemas.VatSummaryOut)
-def vat_summary(db: Session = Depends(get_db), user=Depends(require_user)):
-    return crud.get_vat_summary(db)
+def vat_summary(period: str = "all", db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_vat_summary(db, period=period)
 
 
 @app.get("/tax/corporation-summary", response_model=schemas.CorporationTaxSummaryOut)
-def corporation_tax_summary(db: Session = Depends(get_db), user=Depends(require_user)):
-    return crud.get_corporation_tax_summary(db)
+def corporation_tax_summary(period: str = "all", db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_corporation_tax_summary(db, period=period)
+
+
+@app.get("/tax/direct-summary", response_model=schemas.DirectTaxSummaryOut)
+def direct_tax_summary(period: str = "all", db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_direct_tax_summary(db, period=period)
+
+
+@app.get("/tax/filing-pack", response_model=schemas.FilingPackResponse)
+def filing_pack_summary(period: str = "all", db: Session = Depends(get_db), user=Depends(require_user)):
+    return crud.get_filing_pack(db, period=period)
+
+
+@app.get("/tax/filing-pack/export")
+def filing_pack_export(
+    period: str = "all",
+    format: str = "csv",
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    pack = crud.get_filing_pack(db, period=period)
+    filename_base = f"tax-filing-pack-{period}"
+    csv_rows = [
+        "section,key,value",
+        f"meta,mode,{pack['mode']}",
+        f"meta,basis,{pack['basis']}",
+        f"meta,period_start,{pack['period_start'] or ''}",
+        f"meta,period_end,{pack['period_end'] or ''}",
+        f"vat,output_vat,{pack['vat_summary']['output_vat']}",
+        f"vat,input_vat,{pack['vat_summary']['input_vat']}",
+        f"vat,credit_note_vat,{pack['vat_summary']['credit_note_vat']}",
+        f"vat,refund_vat,{pack['vat_summary']['refund_vat']}",
+        f"vat,net_vat_due,{pack['vat_summary']['net_vat_due']}",
+    ]
+    if pack["direct_tax_summary"].get("corporation"):
+        corp = pack["direct_tax_summary"]["corporation"]
+        csv_rows.extend([
+            f"direct_tax,estimated_profit,{corp['estimated_profit']}",
+            f"direct_tax,estimated_tax_due,{corp['estimated_tax_due']}",
+            f"direct_tax,rate,{corp['rate']}",
+        ])
+    if pack["direct_tax_summary"].get("sole_trader"):
+        sole = pack["direct_tax_summary"]["sole_trader"]
+        csv_rows.extend([
+            f"direct_tax,estimated_profit,{sole['estimated_profit']}",
+            f"direct_tax,taxable_profit,{sole['taxable_profit']}",
+            f"direct_tax,estimated_income_tax_due,{sole['estimated_income_tax_due']}",
+            f"direct_tax,estimated_class4_nic_due,{sole['estimated_class4_nic_due']}",
+        ])
+
+    if format.lower() == "pdf":
+        html = f"""
+        <html><body style="font-family: sans-serif;">
+        <h1>Tax Filing Pack</h1>
+        <p><strong>Mode:</strong> {pack['mode']}</p>
+        <p><strong>Basis:</strong> {pack['basis']}</p>
+        <p><strong>Period:</strong> {pack['period_start'] or '—'} to {pack['period_end'] or '—'}</p>
+        <h2>VAT</h2>
+        <ul>
+          <li>Output VAT: {pack['vat_summary']['output_vat']}</li>
+          <li>Input VAT: {pack['vat_summary']['input_vat']}</li>
+          <li>Credit note VAT: {pack['vat_summary']['credit_note_vat']}</li>
+          <li>Refund VAT: {pack['vat_summary']['refund_vat']}</li>
+          <li>Net VAT due: {pack['vat_summary']['net_vat_due']}</li>
+        </ul>
+        <h2>Direct Tax</h2>
+        <pre>{pack['direct_tax_summary']}</pre>
+        <h2>Assumptions</h2>
+        <pre>{pack['assumptions']}</pre>
+        </body></html>
+        """
+        pdf_bytes = HTML(string=html).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+        )
+
+    csv_text = "\n".join(csv_rows)
+    return Response(
+        content=csv_text.encode("utf-8"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.csv"'},
+    )
 
 
 @app.post("/refunds", response_model=schemas.RefundOut)

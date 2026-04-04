@@ -7,6 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Combobox } from "@/components/ui/combobox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -142,6 +143,23 @@ export default function EmailsPage({
     });
     return Array.from(values).sort();
   }, [composeEntities]);
+
+  const clientFilterOptions = useMemo(
+    () => [
+      { value: "all", label: "All clients" },
+      ...clients.map((client) => ({
+        value: String(client.id),
+        label: client.company || client.name,
+      })),
+      { value: "unassigned", label: "Unassigned" },
+    ],
+    [clients]
+  );
+
+  const presetOptions = useMemo(
+    () => allPresets.map((preset) => ({ value: preset.name, label: preset.name })),
+    [allPresets]
+  );
 
   const allVisibleSelected =
     visibleEntities.length > 0 &&
@@ -644,23 +662,14 @@ export default function EmailsPage({
                 <p className="text-sm font-semibold text-foreground">Filters</p>
                 <div className={fieldClass}>
                   <label className={labelClass}>Client</label>
-                  <Select
+                  <Combobox
                     value={filterClient || "all"}
                     onValueChange={(value) => setFilterClient(value === "all" ? "" : value)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="All clients" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All clients</SelectItem>
-                      {clients.map((client) => (
-                        <SelectItem key={client.id} value={String(client.id)}>
-                          {client.company || client.name}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={clientFilterOptions}
+                    placeholder="All clients"
+                    searchPlaceholder="Search clients..."
+                    emptyLabel="No clients found."
+                  />
                 </div>
                 <div className={fieldClass}>
                   <label className={labelClass}>Status</label>
@@ -705,24 +714,17 @@ export default function EmailsPage({
                 </div>
                 <div className="space-y-2">
                   <label className={labelClass}>Presets</label>
-                  <Select
+                  <Combobox
+                    value=""
                     onValueChange={(value) => {
-                      if (value === "none") return;
+                      if (!value) return;
                       applyPreset(value);
                     }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Apply preset" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Apply preset</SelectItem>
-                      {allPresets.map((preset) => (
-                        <SelectItem key={preset.name} value={preset.name}>
-                          {preset.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={presetOptions}
+                    placeholder="Apply preset"
+                    searchPlaceholder="Search presets..."
+                    emptyLabel="No presets found."
+                  />
                   <div className="flex items-center gap-2">
                     <Input
                       placeholder="Preset name"

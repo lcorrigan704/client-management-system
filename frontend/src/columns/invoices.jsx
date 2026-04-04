@@ -53,6 +53,13 @@ const getInvoiceColumns = ({
       toTimestamp(rowA.original.due_date) - toTimestamp(rowB.original.due_date),
   },
   {
+    accessorKey: "issued_at",
+    header: "Invoice date",
+    cell: ({ row }) => formatDate(row.original.issued_at),
+    sortingFn: (rowA, rowB) =>
+      toTimestamp(rowA.original.issued_at) - toTimestamp(rowB.original.issued_at),
+  },
+  {
     id: "actions",
     header: "Actions",
     cell: ({ row }) => (

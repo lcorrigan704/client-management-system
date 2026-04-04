@@ -1,13 +1,59 @@
-const API_URL = import.meta.env.VITE_API_URL || "";
+function normalizeApiBaseUrl(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  const unquoted = trimmed.replace(/^['"]+|['"]+$/g, "");
+  const noTrailingSlash = unquoted.replace(/\/+$/, "");
+
+  if (/^(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3}):\d+$/.test(noTrailingSlash)) {
+    return `http://${noTrailingSlash}`;
+  }
+
+  return noTrailingSlash;
+}
+
+const API_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
+
+function buildApiUrl(path) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!API_URL) return normalizedPath;
+
+  if (API_URL.startsWith("/")) {
+    return `${API_URL}${normalizedPath}`;
+  }
+
+  if (/^https?:\/\//i.test(API_URL)) {
+    return `${API_URL}${normalizedPath}`;
+  }
+
+  // Final fallback for odd env values.
+  return `http://${API_URL}${normalizedPath}`;
+}
+
+function normalizeFetchError(error) {
+  const message = String(error?.message || "");
+  if (message.includes("did not match the expected pattern")) {
+    return new Error(
+      "Unable to call the API due to an invalid API URL. Check VITE_API_URL in frontend env."
+    );
+  }
+  return error;
+}
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-    },
-    credentials: "include",
-    ...options,
-  });
+  const url = buildApiUrl(path);
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      ...options,
+    });
+  } catch (error) {
+    const normalized = normalizeFetchError(error);
+    throw new Error(`${normalized.message} [${url}]`);
+  }
 
   if (!response.ok) {
     const detail = await response.text();
@@ -22,11 +68,16 @@ async function request(path, options = {}) {
 }
 
 async function requestForm(path, formData) {
-  const response = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-  });
+  let response;
+  try {
+    response = await fetch(buildApiUrl(path), {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+  } catch (error) {
+    throw normalizeFetchError(error);
+  }
 
   if (!response.ok) {
     const detail = await response.text();
@@ -186,6 +237,35 @@ const api = {
     request("/email/draft", { method: "POST", body: JSON.stringify(payload) }),
   composeEmail: (payload) =>
     request("/email/compose", { method: "POST", body: JSON.stringify(payload) }),
+  getTaxRates: () => request("/tax/rates"),
+  saveTaxRates: (payload) =>
+    request("/tax/rates", { method: "PUT", body: JSON.stringify(payload) }),
+  getVatSummary: (period = "all") => request(`/tax/vat-summary?period=${encodeURIComponent(period)}`),
+  getDirectTaxSummary: (period = "all") =>
+    request(`/tax/direct-summary?period=${encodeURIComponent(period)}`),
+  getFilingPack: (period = "all") => request(`/tax/filing-pack?period=${encodeURIComponent(period)}`),
+  downloadFilingPack: async ({ period = "all", format = "csv" } = {}) => {
+    let response;
+    try {
+      response = await fetch(
+        buildApiUrl(
+          `/tax/filing-pack/export?period=${encodeURIComponent(period)}&format=${encodeURIComponent(format)}`
+        ),
+        { credentials: "include" }
+      );
+    } catch (error) {
+      throw normalizeFetchError(error);
+    }
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || "Request failed");
+    }
+    const disposition = response.headers.get("content-disposition") || "";
+    const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+    const filename = filenameMatch ? filenameMatch[1] : `tax-filing-pack.${format}`;
+    const blob = await response.blob();
+    return { blob, filename };
+  },
   listEmailLogs: () => request("/email/logs"),
   resendEmailLog: (id) =>
     request(`/email/logs/${id}/resend`, { method: "POST" }),
@@ -203,12 +283,17 @@ const api = {
     }),
   createBackup: async ({ download = true, store = true } = {}) => {
     if (download) {
-      const response = await fetch(`${API_URL}/admin/backup`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ download, store }),
-      });
+      let response;
+      try {
+        response = await fetch(buildApiUrl("/admin/backup"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ download, store }),
+        });
+      } catch (error) {
+        throw normalizeFetchError(error);
+      }
       if (!response.ok) {
         const detail = await response.text();
         throw new Error(detail || "Request failed");

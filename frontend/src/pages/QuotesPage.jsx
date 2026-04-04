@@ -6,6 +6,8 @@ import { DataTable } from "@/components/data-table";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DatePicker } from "@/components/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import LineItemsEditorDialog from "@/components/line-items-editor-dialog";
 import { gridTwo, fieldClass, labelClass } from "@/ui/formStyles";
 import { formatGBP, formatDate } from "@/utils/format";
 
@@ -24,7 +26,10 @@ export default function QuotesPage({
   onBulkSendReminder,
   onBulkCompose,
   emptyQuote,
+  settings,
 }) {
+  const showVatControls = Boolean(settings?.vat_registered);
+
   const clientMap = new Map(clients.map((client) => [client.id, client]));
   const exportColumns = [
     { key: "display_id", header: "Quote ID" },
@@ -153,12 +158,12 @@ export default function QuotesPage({
       </Card>
 
       <Dialog open={quoteDialogOpen} onOpenChange={setQuoteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>{editingQuoteId ? "Edit quote" : "New quote"}</DialogTitle>
             <DialogDescription>Track quote values and status.</DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={handleQuoteSubmit}>
+          <form className="min-w-0 space-y-4" onSubmit={handleQuoteSubmit}>
             <div className={fieldClass}>
               <label className={labelClass}>Client</label>
               <Select
@@ -166,7 +171,7 @@ export default function QuotesPage({
                 onValueChange={(value) => setQuoteForm({ ...quoteForm, client_id: value })}
                 disabled={editingQuoteId}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select client" />
                 </SelectTrigger>
                 <SelectContent>
@@ -178,15 +183,14 @@ export default function QuotesPage({
                 </SelectContent>
               </Select>
             </div>
-            <div className={gridTwo}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Use custom ID</label>
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={quoteForm.is_legacy}
-                    onChange={(event) =>
-                      setQuoteForm({ ...quoteForm, is_legacy: event.target.checked })
+                    onCheckedChange={(value) =>
+                      setQuoteForm({ ...quoteForm, is_legacy: value === true })
                     }
                   />
                   Override auto-generated ID
@@ -204,7 +208,7 @@ export default function QuotesPage({
                 />
               </div>
             </div>
-            <div className={gridTwo}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Title</label>
                 <Input
@@ -219,7 +223,7 @@ export default function QuotesPage({
                   value={quoteForm.status}
                   onValueChange={(value) => setQuoteForm({ ...quoteForm, status: value })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -241,70 +245,40 @@ export default function QuotesPage({
             </div>
             <div className={fieldClass}>
               <label className={labelClass}>Line items</label>
-              <div className="space-y-2">
-                {quoteForm.line_items.map((item, index) => (
-                  <div key={index} className="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto]">
-                    <Input
-                      placeholder="Description"
-                      value={item.description}
-                      onChange={(event) => {
-                        const next = [...quoteForm.line_items];
-                        next[index] = { ...item, description: event.target.value };
-                        setQuoteForm({ ...quoteForm, line_items: next });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Qty"
-                      value={item.quantity}
-                      onChange={(event) => {
-                        const next = [...quoteForm.line_items];
-                        next[index] = { ...item, quantity: event.target.value };
-                        setQuoteForm({ ...quoteForm, line_items: next });
-                      }}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Unit amount"
-                      value={item.unit_amount}
-                      onChange={(event) => {
-                        const next = [...quoteForm.line_items];
-                        next[index] = { ...item, unit_amount: event.target.value };
-                        setQuoteForm({ ...quoteForm, line_items: next });
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        const next = quoteForm.line_items.filter((_, i) => i !== index);
-                        setQuoteForm({
-                          ...quoteForm,
-                          line_items: next.length ? next : emptyQuote.line_items,
-                        });
-                      }}
-                    >
-                      Remove
-                    </Button>
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    {quoteForm.line_items.length} item
+                    {quoteForm.line_items.length === 1 ? "" : "s"} · Subtotal{" "}
+                    {formatGBP(
+                      quoteForm.line_items.reduce(
+                        (sum, item) =>
+                          sum + Number(item.quantity || 0) * Number(item.unit_amount || 0),
+                        0
+                      )
+                    )}
                   </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    setQuoteForm({
-                      ...quoteForm,
-                      line_items: [
-                        ...quoteForm.line_items,
-                        { description: "", quantity: 1, unit_amount: "" },
-                      ],
-                    })
-                  }
-                >
-                  Add line item
-                </Button>
+                  <LineItemsEditorDialog
+                    title="Edit quote line items"
+                    lineItems={quoteForm.line_items}
+                    onChange={(nextLineItems) =>
+                      setQuoteForm({ ...quoteForm, line_items: nextLineItems })
+                    }
+                    emptyLineItem={emptyQuote.line_items[0]}
+                    showVatControls={showVatControls}
+                  />
+                </div>
+                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {quoteForm.line_items.slice(0, 3).map((item, idx) => (
+                    <p key={`${item.description}-${idx}`} className="break-words">
+                      {item.description || "Untitled line"} · {Number(item.quantity || 0)} ×{" "}
+                      {formatGBP(item.unit_amount)}
+                    </p>
+                  ))}
+                  {quoteForm.line_items.length > 3 ? (
+                    <p>+{quoteForm.line_items.length - 3} more line items</p>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className={fieldClass}>

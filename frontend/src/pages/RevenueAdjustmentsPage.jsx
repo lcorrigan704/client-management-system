@@ -77,6 +77,23 @@ export default function RevenueAdjustmentsPage({
     ? invoiceMap.get(Number(creditNoteForm.invoice_id))
     : null;
 
+  const buildCreditLinesFromInvoice = (invoice) => {
+    if (!invoice?.line_items?.length) return [];
+    return invoice.line_items.map((line) => {
+      const lineTotal = Number(line.quantity || 0) * Number(line.unit_amount || 0);
+      const alreadyCredited = creditUsageByLine.get(line.id) || 0;
+      const remaining = Math.max(0, lineTotal - alreadyCredited);
+      return {
+        invoice_line_item_id: line.id,
+        description: line.description || "",
+        source_quantity: Number(line.quantity || 0),
+        source_unit_amount: Number(line.unit_amount || 0),
+        credited_quantity: Number(line.quantity || 0),
+        credited_amount: remaining > 0 ? Number(remaining.toFixed(2)) : "",
+      };
+    });
+  };
+
   const invoiceOptions = selectedInvoiceId
     ? invoices.filter((invoice) => invoice.id === Number(selectedInvoiceId))
     : invoices;
@@ -303,25 +320,30 @@ export default function RevenueAdjustmentsPage({
       </Card>
 
       <Dialog open={creditNoteDialogOpen} onOpenChange={setCreditNoteDialogOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>{editingCreditNoteId ? "Edit credit note" : "New credit note"}</DialogTitle>
             <DialogDescription>
               Create partial or full credits from invoice line items.
             </DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={handleCreditNoteSubmit}>
-            <div className={gridTwo}>
+          <form className="min-w-0 space-y-4" onSubmit={handleCreditNoteSubmit}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Invoice</label>
                 <Select
                   value={creditNoteForm.invoice_id}
-                  onValueChange={(value) =>
-                    setCreditNoteForm({ ...creditNoteForm, invoice_id: value })
-                  }
+                  onValueChange={(value) => {
+                    const invoice = invoiceMap.get(Number(value));
+                    setCreditNoteForm({
+                      ...creditNoteForm,
+                      invoice_id: value,
+                      line_items: buildCreditLinesFromInvoice(invoice),
+                    });
+                  }}
                   disabled={Boolean(editingCreditNoteId)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select invoice" />
                   </SelectTrigger>
                   <SelectContent>
@@ -345,13 +367,13 @@ export default function RevenueAdjustmentsPage({
 
             {!editingCreditNoteId && selectedInvoice ? (
               <div className="space-y-3">
-                <div className="rounded-md border">
-                  <div className="grid grid-cols-[1.6fr_0.9fr_0.9fr_0.9fr_0.9fr] gap-3 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                    <span>Description</span>
-                    <span>Line total</span>
-                    <span>Remaining</span>
-                    <span>Qty</span>
-                    <span>Credit</span>
+                <div className="rounded-lg border">
+                  <div className="hidden grid-cols-[minmax(0,2fr)_0.9fr_0.9fr_0.8fr_0.9fr] gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground md:grid">
+                    <span className="min-w-0">Description</span>
+                    <span className="text-right">Line total</span>
+                    <span className="text-right">Remaining</span>
+                    <span className="text-right">Qty</span>
+                    <span className="text-right">Credit</span>
                   </div>
                   {(creditNoteForm.line_items || []).map((item, index) => {
                     const sourceLine = selectedInvoice.line_items?.find(
@@ -364,12 +386,36 @@ export default function RevenueAdjustmentsPage({
                     return (
                       <div
                         key={item.invoice_line_item_id}
-                        className="grid grid-cols-[1.6fr_0.9fr_0.9fr_0.9fr_0.9fr] gap-3 border-b px-3 py-3 last:border-b-0"
+                        className="grid gap-2 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,2fr)_0.9fr_0.9fr_0.8fr_0.9fr] md:gap-3"
                       >
-                        <div className="text-sm text-foreground">{item.description}</div>
-                        <div className="text-sm text-muted-foreground">{formatGBP(lineTotal)}</div>
-                        <div className="text-sm text-muted-foreground">{formatGBP(remaining)}</div>
+                        <div className={fieldClass}>
+                          <label className="text-xs font-medium text-muted-foreground md:hidden">
+                            Description
+                          </label>
+                          <div className="min-w-0 text-sm text-foreground">{item.description}</div>
+                        </div>
+                        <div className={fieldClass}>
+                          <label className="text-xs font-medium text-muted-foreground md:hidden">
+                            Line total
+                          </label>
+                          <div className="text-sm text-muted-foreground md:flex md:h-9 md:w-full md:items-center md:justify-end md:text-right">
+                            {formatGBP(lineTotal)}
+                          </div>
+                        </div>
+                        <div className={fieldClass}>
+                          <label className="text-xs font-medium text-muted-foreground md:hidden">
+                            Remaining
+                          </label>
+                          <div className="text-sm text-muted-foreground md:flex md:h-9 md:w-full md:items-center md:justify-end md:text-right">
+                            {formatGBP(remaining)}
+                          </div>
+                        </div>
+                        <div className={fieldClass}>
+                          <label className="text-xs font-medium text-muted-foreground md:hidden">
+                            Qty
+                          </label>
                         <Input
+                          className="w-full md:text-right"
                           type="number"
                           step="0.01"
                           value={item.credited_quantity}
@@ -382,7 +428,13 @@ export default function RevenueAdjustmentsPage({
                             setCreditNoteForm({ ...creditNoteForm, line_items: nextItems });
                           }}
                         />
+                        </div>
+                        <div className={fieldClass}>
+                          <label className="text-xs font-medium text-muted-foreground md:hidden">
+                            Credit
+                          </label>
                         <Input
+                          className="w-full md:text-right"
                           type="number"
                           step="0.01"
                           value={item.credited_amount}
@@ -395,6 +447,7 @@ export default function RevenueAdjustmentsPage({
                             setCreditNoteForm({ ...creditNoteForm, line_items: nextItems });
                           }}
                         />
+                        </div>
                       </div>
                     );
                   })}
@@ -409,6 +462,11 @@ export default function RevenueAdjustmentsPage({
                   )}
                 </p>
               </div>
+            ) : null}
+            {!editingCreditNoteId && selectedInvoice && !(creditNoteForm.line_items || []).length ? (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                This invoice has no available line items to credit.
+              </p>
             ) : null}
 
             {editingCreditNoteId ? (
@@ -442,13 +500,13 @@ export default function RevenueAdjustmentsPage({
       </Dialog>
 
       <Dialog open={refundDialogOpen} onOpenChange={setRefundDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{editingRefundId ? "Edit refund" : "New refund"}</DialogTitle>
             <DialogDescription>Create a partial or full refund from a credit note.</DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={handleRefundSubmit}>
-            <div className={gridTwo}>
+          <form className="min-w-0 space-y-4" onSubmit={handleRefundSubmit}>
+            <div className={`${gridTwo} [&>*]:min-w-0`}>
               <div className={fieldClass}>
                 <label className={labelClass}>Credit note</label>
                 <Select
@@ -458,7 +516,7 @@ export default function RevenueAdjustmentsPage({
                   }
                   disabled={Boolean(editingRefundId)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select credit note" />
                   </SelectTrigger>
                   <SelectContent>
