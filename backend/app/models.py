@@ -1,12 +1,63 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, JSON
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
 from .db import Base
 
 
-class Client(Base):
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    memberships: Mapped[list["WorkspaceMembership"]] = relationship(
+        "WorkspaceMembership", back_populates="workspace", cascade="all, delete-orphan"
+    )
+
+
+class WorkspaceMembership(Base):
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_membership"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), default="user")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="memberships")
+    user: Mapped["User"] = relationship("User", back_populates="workspace_memberships")
+
+
+class WorkspaceScoped:
+    @declared_attr
+    def workspace_id(cls):  # noqa: N805
+        return mapped_column(
+            ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        )
+
+
+class Client(WorkspaceScoped, Base):
     __tablename__ = "clients"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -39,7 +90,7 @@ class Client(Base):
     )
 
 
-class Invoice(Base):
+class Invoice(WorkspaceScoped, Base):
     __tablename__ = "invoices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -79,7 +130,7 @@ class Invoice(Base):
     )
 
 
-class Quote(Base):
+class Quote(WorkspaceScoped, Base):
     __tablename__ = "quotes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -114,7 +165,7 @@ class Quote(Base):
     )
 
 
-class InvoiceLineItem(Base):
+class InvoiceLineItem(WorkspaceScoped, Base):
     __tablename__ = "invoice_line_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -139,7 +190,7 @@ class InvoiceLineItem(Base):
     )
 
 
-class CreditNote(Base):
+class CreditNote(WorkspaceScoped, Base):
     __tablename__ = "credit_notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -168,7 +219,7 @@ class CreditNote(Base):
     )
 
 
-class CreditNoteLineItem(Base):
+class CreditNoteLineItem(WorkspaceScoped, Base):
     __tablename__ = "credit_note_line_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -196,7 +247,7 @@ class CreditNoteLineItem(Base):
     )
 
 
-class Refund(Base):
+class Refund(WorkspaceScoped, Base):
     __tablename__ = "refunds"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -223,7 +274,7 @@ class Refund(Base):
     invoice: Mapped["Invoice"] = relationship("Invoice")
 
 
-class QuoteLineItem(Base):
+class QuoteLineItem(WorkspaceScoped, Base):
     __tablename__ = "quote_line_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -245,7 +296,7 @@ class QuoteLineItem(Base):
     quote: Mapped["Quote"] = relationship("Quote", back_populates="line_items")
 
 
-class ServiceAgreement(Base):
+class ServiceAgreement(WorkspaceScoped, Base):
     __tablename__ = "service_agreements"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -296,7 +347,7 @@ class ServiceAgreement(Base):
         return self.updated_by.email if self.updated_by else None
 
 
-class ServiceAgreementSLA(Base):
+class ServiceAgreementSLA(WorkspaceScoped, Base):
     __tablename__ = "agreement_slas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -309,7 +360,7 @@ class ServiceAgreementSLA(Base):
     agreement: Mapped["ServiceAgreement"] = relationship("ServiceAgreement", back_populates="sla_items")
 
 
-class Proposal(Base):
+class Proposal(WorkspaceScoped, Base):
     __tablename__ = "proposals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -353,7 +404,7 @@ class Proposal(Base):
         return self.updated_by.email if self.updated_by else None
 
 
-class ProposalRequirement(Base):
+class ProposalRequirement(WorkspaceScoped, Base):
     __tablename__ = "proposal_requirements"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -365,7 +416,7 @@ class ProposalRequirement(Base):
     proposal: Mapped["Proposal"] = relationship("Proposal", back_populates="requirements")
 
 
-class ProposalAttachment(Base):
+class ProposalAttachment(WorkspaceScoped, Base):
     __tablename__ = "proposal_attachments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -378,7 +429,7 @@ class ProposalAttachment(Base):
     proposal: Mapped["Proposal"] = relationship("Proposal", back_populates="attachments")
 
 
-class ServiceAgreementVersion(Base):
+class ServiceAgreementVersion(WorkspaceScoped, Base):
     __tablename__ = "agreement_versions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -402,7 +453,7 @@ class ServiceAgreementVersion(Base):
         return self.created_by.email if self.created_by else None
 
 
-class ProposalVersion(Base):
+class ProposalVersion(WorkspaceScoped, Base):
     __tablename__ = "proposal_versions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -428,7 +479,7 @@ class ProposalVersion(Base):
         return self.created_by.email if self.created_by else None
 
 
-class AgreementVersionComment(Base):
+class AgreementVersionComment(WorkspaceScoped, Base):
     __tablename__ = "agreement_version_comments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -462,7 +513,7 @@ class AgreementVersionComment(Base):
         return bool(self.version.is_current) if self.version else False
 
 
-class AgreementVersionCommentReaction(Base):
+class AgreementVersionCommentReaction(WorkspaceScoped, Base):
     __tablename__ = "agreement_version_comment_reactions"
     __table_args__ = (UniqueConstraint("comment_id", "user_id", name="uq_agreement_comment_user"),)
 
@@ -475,7 +526,7 @@ class AgreementVersionCommentReaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class ProposalVersionComment(Base):
+class ProposalVersionComment(WorkspaceScoped, Base):
     __tablename__ = "proposal_version_comments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -509,7 +560,7 @@ class ProposalVersionComment(Base):
         return bool(self.version.is_current) if self.version else False
 
 
-class ProposalVersionCommentReaction(Base):
+class ProposalVersionCommentReaction(WorkspaceScoped, Base):
     __tablename__ = "proposal_version_comment_reactions"
     __table_args__ = (UniqueConstraint("comment_id", "user_id", name="uq_proposal_comment_user"),)
 
@@ -522,7 +573,7 @@ class ProposalVersionCommentReaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class Expense(Base):
+class Expense(WorkspaceScoped, Base):
     __tablename__ = "expenses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -553,7 +604,7 @@ class Expense(Base):
     )
 
 
-class ExpenseReceipt(Base):
+class ExpenseReceipt(WorkspaceScoped, Base):
     __tablename__ = "expense_receipts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -566,7 +617,7 @@ class ExpenseReceipt(Base):
     expense: Mapped["Expense"] = relationship("Expense", back_populates="receipts")
 
 
-class EmailLog(Base):
+class EmailLog(WorkspaceScoped, Base):
     __tablename__ = "email_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -596,7 +647,7 @@ class EmailLog(Base):
     created_by: Mapped["User"] = relationship("User")
 
 
-class InvoicePayment(Base):
+class InvoicePayment(WorkspaceScoped, Base):
     __tablename__ = "invoice_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -616,7 +667,7 @@ class InvoicePayment(Base):
     )
 
 
-class PaymentTaxAllocation(Base):
+class PaymentTaxAllocation(WorkspaceScoped, Base):
     __tablename__ = "payment_tax_allocations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -633,7 +684,7 @@ class PaymentTaxAllocation(Base):
     payment: Mapped["InvoicePayment"] = relationship("InvoicePayment", back_populates="tax_allocations")
 
 
-class Settings(Base):
+class Settings(WorkspaceScoped, Base):
     __tablename__ = "settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -705,7 +756,7 @@ class Settings(Base):
     other_taxes: Mapped[list[dict] | None] = mapped_column(JSON, default=list)
 
 
-class TaxRateCatalog(Base):
+class TaxRateCatalog(WorkspaceScoped, Base):
     __tablename__ = "tax_rate_catalogs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -737,6 +788,9 @@ class User(Base):
 
     sessions: Mapped[list["UserSession"]] = relationship("UserSession", back_populates="user")
     expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="user")
+    workspace_memberships: Mapped[list["WorkspaceMembership"]] = relationship(
+        "WorkspaceMembership", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSession(Base):
@@ -744,8 +798,12 @@ class UserSession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    active_workspace_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
     user: Mapped["User"] = relationship("User", back_populates="sessions")
+    active_workspace: Mapped["Workspace"] = relationship("Workspace")

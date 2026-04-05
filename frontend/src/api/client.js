@@ -281,7 +281,7 @@ const api = {
       method: "POST",
       body: JSON.stringify({ log_ids: logIds }),
     }),
-  createBackup: async ({ download = true, store = true } = {}) => {
+  createBackup: async ({ download = true, store = true, scope = "workspace" } = {}) => {
     if (download) {
       let response;
       try {
@@ -289,7 +289,7 @@ const api = {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ download, store }),
+          body: JSON.stringify({ download, store, scope }),
         });
       } catch (error) {
         throw normalizeFetchError(error);
@@ -307,25 +307,53 @@ const api = {
 
     return request("/admin/backup", {
       method: "POST",
-      body: JSON.stringify({ download, store }),
+      body: JSON.stringify({ download, store, scope }),
     });
   },
   listBackups: () => request("/admin/backups"),
-  restoreBackup: (filename) =>
-    request("/admin/restore", { method: "POST", body: JSON.stringify({ filename }) }),
-  restoreBackupUpload: (file) => {
+  restoreBackup: (filename, workspaceName) =>
+    request("/admin/restore", {
+      method: "POST",
+      body: JSON.stringify({ filename, workspace_name: workspaceName }),
+    }),
+  restoreBackupUpload: (file, workspaceName) => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("workspace_name", workspaceName);
     return requestForm("/admin/restore/upload", formData);
   },
   resetData: () => request("/admin/reset", { method: "POST" }),
-  resetWorkspace: () => request("/admin/reset-workspace", { method: "POST" }),
+  resetWorkspace: (workspaceNameConfirm) =>
+    request("/admin/reset-workspace", {
+      method: "POST",
+      body: JSON.stringify({ workspace_name_confirm: workspaceNameConfirm }),
+    }),
   authStatus: () => request("/auth/status"),
   authLogin: (payload) =>
     request("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   authSetup: (payload) =>
     request("/auth/setup", { method: "POST", body: JSON.stringify(payload) }),
   authLogout: () => request("/auth/logout", { method: "POST" }),
+  listWorkspaces: () => request("/workspaces"),
+  createWorkspace: (payload) =>
+    request("/workspaces", { method: "POST", body: JSON.stringify(payload) }),
+  updateWorkspace: (id, payload) =>
+    request(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  switchWorkspace: (workspaceId) =>
+    request("/workspaces/switch", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    }),
+  setDefaultWorkspace: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/set-default`, { method: "POST" }),
+  listWorkspaceMembers: (workspaceId) => request(`/workspaces/${workspaceId}/members`),
+  updateWorkspaceMember: (workspaceId, userId, payload) =>
+    request(`/workspaces/${workspaceId}/members/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteWorkspaceMember: (workspaceId, userId) =>
+    request(`/workspaces/${workspaceId}/members/${userId}`, { method: "DELETE" }),
   listUsers: () => request("/auth/users"),
   listAssignableUsers: () => request("/auth/users/assignable"),
   searchUsers: (query) => request(`/auth/users/search?q=${encodeURIComponent(query)}`),

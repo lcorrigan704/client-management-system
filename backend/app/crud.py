@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+import re
 
 from sqlalchemy.orm import Session
 
@@ -103,6 +104,26 @@ def _default_tax_rate_catalog_payload():
     }
 
 
+def _slugify_workspace_name(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    return base or "workspace"
+
+
+def _ensure_workspace_slug(db: Session, name: str, exclude_workspace_id: int | None = None) -> str:
+    base = _slugify_workspace_name(name)
+    slug = base
+    suffix = 2
+    while True:
+        query = db.query(models.Workspace).filter(models.Workspace.slug == slug)
+        if exclude_workspace_id is not None:
+            query = query.filter(models.Workspace.id != exclude_workspace_id)
+        if not query.first():
+            break
+        slug = f"{base}-{suffix}"
+        suffix += 1
+    return slug
+
+
 def _apply_document_totals(document, line_items):
     document.net_amount = _round_money(sum(float(item.net_amount or 0) for item in line_items))
     document.tax_amount = _round_money(sum(float(item.tax_amount or 0) for item in line_items))
@@ -170,8 +191,11 @@ def ensure_display_id_unique(db: Session, model, display_id: str, exclude_id: in
         raise ValueError("Display ID already exists.")
 
 
-def get_or_create_settings(db: Session) -> models.Settings:
-    settings = db.query(models.Settings).first()
+def get_or_create_settings(db: Session, workspace_id: int | None = None) -> models.Settings:
+    settings_query = db.query(models.Settings)
+    if workspace_id is not None:
+        settings_query = settings_query.filter(models.Settings.workspace_id == workspace_id)
+    settings = settings_query.first()
     if settings:
         changed = False
         if not settings.expense_prefix:
@@ -227,14 +251,18 @@ def get_or_create_settings(db: Session) -> models.Settings:
             db.refresh(settings)
         return settings
     settings = models.Settings()
+    if workspace_id is not None:
+        settings.workspace_id = workspace_id
     db.add(settings)
     db.commit()
     db.refresh(settings)
     return settings
 
 
-def update_settings(db: Session, payload: schemas.SettingsUpdate) -> models.Settings:
-    settings = get_or_create_settings(db)
+def update_settings(
+    db: Session, payload: schemas.SettingsUpdate, workspace_id: int | None = None
+) -> models.Settings:
+    settings = get_or_create_settings(db, workspace_id=workspace_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field == "smtp_password":
             if value:
@@ -428,20 +456,35 @@ def get_user(db: Session, user_id: int):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
 
-def list_users(db: Session):
-    return db.query(models.User).order_by(models.User.created_at.desc()).all()
+def list_users(db: Session, workspace_id: int | None = None):
+    query = db.query(models.User)
+    if workspace_id is not None:
+        query = query.join(
+            models.WorkspaceMembership,
+            models.WorkspaceMembership.user_id == models.User.id,
+        ).filter(models.WorkspaceMembership.workspace_id == workspace_id)
+    return query.order_by(models.User.created_at.desc()).all()
 
 
-def list_active_users(db: Session):
-    return (
-        db.query(models.User)
-        .filter(models.User.is_active == True)  # noqa: E712
-        .order_by(models.User.created_at.desc())
-        .all()
-    )
+def list_active_users(db: Session, workspace_id: int | None = None):
+    query = db.query(models.User).filter(models.User.is_active == True)  # noqa: E712
+    if workspace_id is not None:
+        query = query.join(
+            models.WorkspaceMembership,
+            models.WorkspaceMembership.user_id == models.User.id,
+        ).filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.is_active == True,  # noqa: E712
+        )
+    return query.order_by(models.User.created_at.desc()).all()
 
 
-def create_user(db: Session, payload: schemas.UserCreate, role: str | None = None):
+def create_user(
+    db: Session,
+    payload: schemas.UserCreate,
+    role: str | None = None,
+    workspace_id: int | None = None,
+):
     user = models.User(
         email=payload.email,
         password_hash=hash_password(payload.password),
@@ -449,9 +492,142 @@ def create_user(db: Session, payload: schemas.UserCreate, role: str | None = Non
         is_active=payload.is_active,
     )
     db.add(user)
+    db.flush()
+    if workspace_id is not None:
+        existing = get_workspace_membership(db, workspace_id, user.id)
+        if not existing:
+            db.add(
+                models.WorkspaceMembership(
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    role=role or payload.role,
+                    is_default=False,
+                    is_active=True,
+                )
+            )
     db.commit()
     db.refresh(user)
     return user
+
+
+def get_workspace(db: Session, workspace_id: int):
+    return db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
+
+
+def list_workspaces_for_user(db: Session, user_id: int):
+    return (
+        db.query(models.WorkspaceMembership)
+        .filter(models.WorkspaceMembership.user_id == user_id)
+        .order_by(models.WorkspaceMembership.is_default.desc(), models.WorkspaceMembership.created_at.asc())
+        .all()
+    )
+
+
+def create_workspace(
+    db: Session,
+    payload: schemas.WorkspaceCreate,
+    created_by_user: models.User,
+):
+    workspace = models.Workspace(
+        name=payload.name.strip(),
+        slug=_ensure_workspace_slug(db, payload.name),
+        is_active=True,
+    )
+    db.add(workspace)
+    db.flush()
+    membership = models.WorkspaceMembership(
+        workspace_id=workspace.id,
+        user_id=created_by_user.id,
+        role="owner" if created_by_user.role == "owner" else "admin",
+        is_default=payload.set_default,
+        is_active=True,
+    )
+    db.add(membership)
+    if payload.set_default:
+        (
+            db.query(models.WorkspaceMembership)
+            .filter(
+                models.WorkspaceMembership.user_id == created_by_user.id,
+                models.WorkspaceMembership.workspace_id != workspace.id,
+            )
+            .update({models.WorkspaceMembership.is_default: False}, synchronize_session=False)
+        )
+    db.commit()
+    db.refresh(workspace)
+    return workspace
+
+
+def get_workspace_membership(db: Session, workspace_id: int, user_id: int):
+    return (
+        db.query(models.WorkspaceMembership)
+        .filter(
+            models.WorkspaceMembership.workspace_id == workspace_id,
+            models.WorkspaceMembership.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def list_workspace_members(db: Session, workspace_id: int):
+    return (
+        db.query(models.WorkspaceMembership)
+        .filter(models.WorkspaceMembership.workspace_id == workspace_id)
+        .order_by(models.WorkspaceMembership.created_at.asc())
+        .all()
+    )
+
+
+def update_workspace(db: Session, workspace: models.Workspace, payload: schemas.WorkspaceUpdate):
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"]:
+        workspace.name = data["name"].strip()
+        workspace.slug = _ensure_workspace_slug(db, data["name"], exclude_workspace_id=workspace.id)
+    if "is_active" in data:
+        workspace.is_active = bool(data["is_active"])
+    db.commit()
+    db.refresh(workspace)
+    return workspace
+
+
+def set_default_workspace(db: Session, user_id: int, workspace_id: int):
+    (
+        db.query(models.WorkspaceMembership)
+        .filter(models.WorkspaceMembership.user_id == user_id)
+        .update({models.WorkspaceMembership.is_default: False}, synchronize_session=False)
+    )
+    membership = get_workspace_membership(db, workspace_id, user_id)
+    if membership:
+        membership.is_default = True
+        db.commit()
+        db.refresh(membership)
+    return membership
+
+
+def update_workspace_membership(
+    db: Session,
+    membership: models.WorkspaceMembership,
+    payload: schemas.WorkspaceMembershipUpdate,
+):
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(membership, field, value)
+    if data.get("is_default"):
+        (
+            db.query(models.WorkspaceMembership)
+            .filter(
+                models.WorkspaceMembership.user_id == membership.user_id,
+                models.WorkspaceMembership.workspace_id != membership.workspace_id,
+            )
+            .update({models.WorkspaceMembership.is_default: False}, synchronize_session=False)
+        )
+    db.commit()
+    db.refresh(membership)
+    return membership
+
+
+def delete_workspace_membership(db: Session, membership: models.WorkspaceMembership):
+    db.delete(membership)
+    db.commit()
 
 
 def update_user(db: Session, user: models.User, payload: schemas.UserUpdate):
@@ -471,8 +647,19 @@ def delete_user(db: Session, user: models.User):
     db.commit()
 
 
-def create_session(db: Session, user: models.User, token_hash: str, expires_at: datetime):
-    session = models.UserSession(user_id=user.id, token_hash=token_hash, expires_at=expires_at)
+def create_session(
+    db: Session,
+    user: models.User,
+    token_hash: str,
+    expires_at: datetime,
+    active_workspace_id: int | None = None,
+):
+    session = models.UserSession(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        active_workspace_id=active_workspace_id,
+    )
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -481,6 +668,15 @@ def create_session(db: Session, user: models.User, token_hash: str, expires_at: 
 
 def get_session_by_hash(db: Session, token_hash: str):
     return db.query(models.UserSession).filter(models.UserSession.token_hash == token_hash).first()
+
+
+def set_session_active_workspace(
+    db: Session, session: models.UserSession, workspace_id: int
+) -> models.UserSession:
+    session.active_workspace_id = workspace_id
+    db.commit()
+    db.refresh(session)
+    return session
 
 
 def delete_session(db: Session, session: models.UserSession):
