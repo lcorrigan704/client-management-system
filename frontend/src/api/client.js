@@ -244,7 +244,7 @@ const api = {
   getDirectTaxSummary: (period = "all") =>
     request(`/tax/direct-summary?period=${encodeURIComponent(period)}`),
   getFilingPack: (period = "all") => request(`/tax/filing-pack?period=${encodeURIComponent(period)}`),
-  downloadFilingPack: async ({ period = "all", format = "csv" } = {}) => {
+  downloadFilingPack: async ({ period = "all", format = "zip" } = {}) => {
     let response;
     try {
       response = await fetch(
@@ -262,7 +262,7 @@ const api = {
     }
     const disposition = response.headers.get("content-disposition") || "";
     const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
-    const filename = filenameMatch ? filenameMatch[1] : `tax-filing-pack.${format}`;
+    const filename = filenameMatch ? filenameMatch[1] : `tax-filing-pack.${format || "zip"}`;
     const blob = await response.blob();
     return { blob, filename };
   },

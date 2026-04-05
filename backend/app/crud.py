@@ -51,13 +51,29 @@ def _build_line_item_model(model_cls, item: dict):
 
 def _apply_line_tax_defaults(item: dict, settings: models.Settings):
     next_item = dict(item or {})
+    vat_enabled = bool(getattr(settings, "vat_registered", False))
     next_item.setdefault("tax_kind", "vat")
     next_item.setdefault("tax_code", settings.default_vat_code or "standard")
-    if next_item.get("tax_rate") is None:
+    if not vat_enabled:
+        next_item["tax_rate"] = 0
+        next_item["tax_inclusive"] = False
+    elif next_item.get("tax_rate") is None:
         next_item["tax_rate"] = float(settings.default_vat_rate or 0)
     next_item.setdefault("tax_inclusive", bool(settings.vat_inclusive_default))
     next_item.setdefault("tax_override", False)
     return next_item
+
+
+def _normalize_expense_tax_fields(data: dict, settings: models.Settings) -> dict:
+    next_data = dict(data or {})
+    if not bool(getattr(settings, "vat_registered", False)):
+        next_data["tax_rate"] = 0
+        next_data["tax_inclusive"] = False
+        next_data["tax_amount"] = 0
+        amount_value = _round_money(next_data.get("amount", 0))
+        next_data["net_amount"] = amount_value
+        next_data["gross_amount"] = amount_value
+    return next_data
 
 
 def _default_tax_rate_catalog_payload():
@@ -1408,6 +1424,8 @@ def restore_proposal_version(
 
 def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseCreate):
     data = payload.model_dump()
+    settings = get_or_create_settings(db)
+    data = _normalize_expense_tax_fields(data, settings)
     receipts = data.pop("receipts", None) or []
     display_id = (data.pop("display_id", None) or "").strip()
     is_legacy = data.pop("is_legacy", None)
@@ -1430,7 +1448,6 @@ def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseC
     ]
     db.commit()
     db.refresh(expense)
-    settings = get_or_create_settings(db)
     if not expense.display_id:
         if display_id:
             ensure_display_id_unique(db, models.Expense, display_id)
@@ -1446,6 +1463,30 @@ def create_expense(db: Session, client_id: int | None, payload: schemas.ExpenseC
 
 def update_expense(db: Session, expense: models.Expense, payload: schemas.ExpenseUpdate):
     data = payload.model_dump(exclude_unset=True)
+    settings = get_or_create_settings(db)
+    if any(
+        field in data
+        for field in ("amount", "net_amount", "tax_amount", "gross_amount", "tax_rate", "tax_inclusive")
+    ):
+        merged_for_normalization = {
+            "amount": data.get("amount", expense.amount),
+            "net_amount": data.get("net_amount", expense.net_amount),
+            "tax_amount": data.get("tax_amount", expense.tax_amount),
+            "gross_amount": data.get("gross_amount", expense.gross_amount),
+            "tax_rate": data.get("tax_rate", expense.tax_rate),
+            "tax_inclusive": data.get("tax_inclusive", expense.tax_inclusive),
+        }
+        normalized = _normalize_expense_tax_fields(merged_for_normalization, settings)
+        data.update(
+            {
+                "tax_rate": normalized.get("tax_rate"),
+                "tax_inclusive": normalized.get("tax_inclusive"),
+                "tax_amount": normalized.get("tax_amount"),
+                "net_amount": normalized.get("net_amount"),
+                "gross_amount": normalized.get("gross_amount"),
+                "amount": normalized.get("amount"),
+            }
+        )
     receipts = data.pop("receipts", None)
     if "display_id" in data:
         display_id = (data.pop("display_id") or "").strip()
@@ -1481,7 +1522,6 @@ def update_expense(db: Session, expense: models.Expense, payload: schemas.Expens
     db.commit()
     db.refresh(expense)
     if not expense.display_id:
-        settings = get_or_create_settings(db)
         expense.display_id = build_display_id(settings.expense_prefix or "EXP", expense.id)
         expense.is_legacy = False
         db.commit()

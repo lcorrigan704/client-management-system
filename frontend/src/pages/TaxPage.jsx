@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
-import { DataTable } from "@/components/data-table";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +20,15 @@ import {
 import { api } from "@/api/client";
 import { formatDateTime, formatGBP } from "@/utils/format";
 import { fieldClass, labelClass } from "@/ui/formStyles";
+
+const FILING_CHECKLIST_ITEMS = [
+  { id: "export_data", label: "Export filing bundle" },
+  { id: "gather_bank_statements", label: "Gather bank statements" },
+  { id: "gather_p60s", label: "Gather P60s / payroll documents" },
+  { id: "share_with_accountant", label: "Share pack with accountant / prepare HMRC filing" },
+  { id: "submit_filing", label: "Submit filing" },
+  { id: "record_reference", label: "Record confirmation/reference" },
+];
 
 export default function TaxPage({
   settings,
@@ -35,10 +43,21 @@ export default function TaxPage({
   const [filingPack, setFilingPack] = useState(null);
   const [ratesCatalog, setRatesCatalog] = useState(null);
   const [ratesLoading, setRatesLoading] = useState(false);
+  const [checklistSaving, setChecklistSaving] = useState(false);
   const lastErrorToastRef = useRef({ message: "", at: 0 });
   const period = useMemo(
     () => (selectedYear === "all" ? "all" : `fy_${selectedYear}`),
     [selectedYear]
+  );
+  const isSpecificFinancialYear = selectedYear !== "all";
+  const filingChecklistState = settings?.filing_checklist_state || {};
+  const activeChecklist = useMemo(() => {
+    if (!isSpecificFinancialYear) return {};
+    return filingChecklistState[period] || {};
+  }, [filingChecklistState, isSpecificFinancialYear, period]);
+  const checklistCompletedCount = useMemo(
+    () => FILING_CHECKLIST_ITEMS.filter((item) => activeChecklist[item.id] === true).length,
+    [activeChecklist]
   );
   const vatEnabled = Boolean(settings?.vat_registered);
 
@@ -101,37 +120,62 @@ export default function TaxPage({
     }
   }, [ratesCatalog]);
 
-  const vatRateColumns = useMemo(
-    () => [
-      { accessorKey: "code", header: "Code" },
-      { accessorKey: "label", header: "Label" },
-      {
-        accessorKey: "rate",
-        header: "Rate %",
-        cell: ({ row }) => `${Number(row.original.rate || 0).toFixed(2)}%`,
-      },
-      {
-        accessorKey: "reclaimable",
-        header: "Reclaimable",
-        cell: ({ row }) => (
-          <Badge variant={row.original.reclaimable ? "secondary" : "outline"}>
-            {row.original.reclaimable ? "Yes" : "No"}
-          </Badge>
-        ),
-      },
-    ],
-    []
+  const saveChecklistState = useCallback(
+    async (nextChecklistState, errorMessage = "Unable to save checklist.") => {
+      const previous = settings?.filing_checklist_state || {};
+      updateSettings({ filing_checklist_state: nextChecklistState });
+      try {
+        setChecklistSaving(true);
+        await api.saveSettings({ filing_checklist_state: nextChecklistState });
+      } catch (error) {
+        updateSettings({ filing_checklist_state: previous });
+        toast.error(error?.message || errorMessage);
+      } finally {
+        setChecklistSaving(false);
+      }
+    },
+    [settings?.filing_checklist_state, updateSettings]
   );
 
-  const downloadPack = async (format) => {
+  const toggleChecklistItem = useCallback(
+    async (itemId, checked) => {
+      if (!isSpecificFinancialYear) return;
+      const nextChecklistState = {
+        ...(settings?.filing_checklist_state || {}),
+        [period]: {
+          ...((settings?.filing_checklist_state || {})[period] || {}),
+          [itemId]: checked === true,
+        },
+      };
+      await saveChecklistState(nextChecklistState);
+    },
+    [isSpecificFinancialYear, period, saveChecklistState, settings?.filing_checklist_state]
+  );
+
+  const downloadPack = async () => {
+    if (!isSpecificFinancialYear) {
+      toast.error("Select a specific financial year before exporting.");
+      return;
+    }
     try {
-      const { blob, filename } = await api.downloadFilingPack({ period, format });
+      const { blob, filename } = await api.downloadFilingPack({ period, format: "zip" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
+      const existing = (settings?.filing_checklist_state || {})[period] || {};
+      if (!existing.export_data) {
+        const nextChecklistState = {
+          ...(settings?.filing_checklist_state || {}),
+          [period]: {
+            ...existing,
+            export_data: true,
+          },
+        };
+        await saveChecklistState(nextChecklistState, "Filing bundle exported, but checklist was not saved.");
+      }
     } catch (error) {
       toast.error(error.message || "Unable to export filing pack.");
     }
@@ -293,6 +337,10 @@ export default function TaxPage({
           <CardHeader>
             <CardTitle>VAT summary</CardTitle>
             <CardDescription>Accrual/cash VAT due estimates by selected period.</CardDescription>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Estimates are guidance only. This app does not replace an accountant, and VAT liabilities
+              must be confirmed before filing.
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-3">
             <div className={fieldClass}>
@@ -330,6 +378,10 @@ export default function TaxPage({
             <CardDescription>
               Mode: {settings?.business_tax_mode === "sole_trader" ? "Sole trader" : "Limited company"}.
             </CardDescription>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Figures are planning suggestions only, not final liabilities. Confirm tax with a qualified
+              accountant before submitting to HMRC.
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {directSummary?.corporation ? (
@@ -485,27 +537,56 @@ export default function TaxPage({
         <Card>
           <CardHeader>
             <CardTitle>Filing pack</CardTitle>
-            <CardDescription>Accountant-ready summary and exports for the selected period.</CardDescription>
+            <CardDescription>Export a structured FY handoff bundle and track filing completion.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => downloadPack("csv")}>
-                Export CSV
+              <Button
+                type="button"
+                variant="outline"
+                onClick={downloadPack}
+                disabled={!isSpecificFinancialYear}
+              >
+                Export filing bundle (ZIP)
               </Button>
-              <Button type="button" variant="outline" onClick={() => downloadPack("pdf")}>
-                Export PDF
-              </Button>
+              {!isSpecificFinancialYear ? (
+                <span className="text-xs text-muted-foreground">
+                  Select a specific FY in the sidebar to enable export.
+                </span>
+              ) : null}
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              This app supports admin preparation only. It does not replace accountant advice or guarantee
+              final HMRC payable amounts.
+            </div>
+            <div className="rounded-md border p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-medium">Filing checklist</p>
+                <Badge variant="outline">
+                  {checklistCompletedCount}/{FILING_CHECKLIST_ITEMS.length} complete
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                {FILING_CHECKLIST_ITEMS.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex min-h-9 items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                  >
+                    <span>{item.label}</span>
+                    <Checkbox
+                      checked={activeChecklist[item.id] === true}
+                      disabled={!isSpecificFinancialYear || checklistSaving}
+                      onCheckedChange={(value) => toggleChecklistItem(item.id, value === true)}
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               Generated {formatDateTime(filingPack?.assumptions?.generated_at)} ·{" "}
               {filingPack?.assumptions?.source_label || "HMRC guidance"} ·{" "}
               {filingPack?.assumptions?.version_label || "baseline"}
             </div>
-            <DataTable
-              columns={vatRateColumns}
-              data={ratesCatalog?.vat_rates || []}
-              emptyMessage="No VAT rates configured."
-            />
           </CardContent>
         </Card>
       ) : null}

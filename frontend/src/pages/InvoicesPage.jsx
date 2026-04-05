@@ -233,7 +233,11 @@ export default function InvoicesPage({
                             unit_amount: item.unit_amount,
                             tax_kind: item.tax_kind || "vat",
                             tax_code: item.tax_code || "standard",
-                            tax_rate: item.tax_rate ?? 20,
+                            tax_rate:
+                              item.tax_rate ??
+                              (settings?.vat_registered
+                                ? settings?.default_vat_rate ?? 20
+                                : 0),
                             tax_inclusive: item.tax_inclusive === true,
                             tax_override: item.tax_override === true,
                           }))

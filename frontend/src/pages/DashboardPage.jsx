@@ -11,13 +11,13 @@ import { Button } from "@/components/ui/button";
 function SummaryStat({ label, value, tone = "default" }) {
   const toneClass =
     tone === "positive"
-      ? "text-emerald-600"
+      ? "text-emerald-600 dark:text-emerald-400"
       : tone === "negative"
-        ? "text-rose-600"
+        ? "text-rose-600 dark:text-rose-400"
         : "text-foreground";
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-2xl bg-slate-50/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div className="flex min-w-0 flex-col gap-1 rounded-2xl border border-border/50 bg-muted/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className={`text-sm font-semibold leading-tight ${toneClass}`}>{value}</span>
     </div>
@@ -30,7 +30,7 @@ function SummaryActionStat({ label, value, onClick }) {
       type="button"
       onClick={onClick}
       aria-label={`Open ${label.toLowerCase()}`}
-      className="flex w-full items-center justify-between rounded-2xl bg-slate-50/90 px-4 py-3 text-left transition-colors hover:bg-slate-100/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="flex w-full items-center justify-between rounded-2xl border border-border/50 bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
@@ -43,7 +43,7 @@ function SummaryActionStat({ label, value, onClick }) {
 
 function MetricTile({ label, value, description, className = "" }) {
   return (
-    <div className={`min-w-0 rounded-3xl bg-white/88 p-4 ${className}`}>
+    <div className={`min-w-0 rounded-3xl border border-border/50 bg-card p-4 ${className}`}>
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
         {label}
       </p>
@@ -59,8 +59,8 @@ function ReminderItem({ icon, label, value }) {
   const IconComponent = icon;
 
   return (
-    <div className="flex items-start gap-3 rounded-2xl bg-slate-50/85 px-4 py-4">
-      <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+    <div className="flex items-start gap-3 rounded-2xl border border-border/50 bg-muted/40 px-4 py-4">
+      <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
         <IconComponent className="h-4 w-4" />
       </div>
       <div className="space-y-1">
@@ -75,11 +75,11 @@ function ReminderItem({ icon, label, value }) {
 
 function ProgressBand({ label, value, amount, tint = "slate" }) {
   const width = Math.max(8, Math.min(100, value));
-  const bandStyles = {
-    slate: "#0f172a",
-    blue: "#2563eb",
-    emerald: "#059669",
-    amber: "#d97706",
+  const bandClass = {
+    slate: "bg-foreground/85",
+    blue: "bg-blue-600 dark:bg-blue-500",
+    emerald: "bg-emerald-600 dark:bg-emerald-500",
+    amber: "bg-amber-600 dark:bg-amber-500",
   };
 
   return (
@@ -88,10 +88,10 @@ function ProgressBand({ label, value, amount, tint = "slate" }) {
         <span className="text-sm font-medium text-foreground">{label}</span>
         <span className="text-sm text-muted-foreground">{amount}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100 ">
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full"
-          style={{ width: `${width}%`, backgroundColor: bandStyles[tint] }}
+          className={`h-full rounded-full ${bandClass[tint] || bandClass.slate}`}
+          style={{ width: `${width}%` }}
         />
       </div>
     </div>
@@ -100,14 +100,14 @@ function ProgressBand({ label, value, amount, tint = "slate" }) {
 
 function AdjustmentTile({ label, value, detail, tone = "slate" }) {
   const toneStyles = {
-    slate: "bg-slate-50 text-slate-700",
-    amber: "bg-amber-50 text-amber-700",
-    blue: "bg-blue-50 text-blue-700",
-    emerald: "bg-emerald-50 text-emerald-700",
+    slate: "bg-muted text-muted-foreground",
+    amber: "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+    blue: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300",
+    emerald: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
   };
 
   return (
-    <div className="rounded-2xl bg-white/90 p-4">
+    <div className="rounded-2xl border border-border/50 bg-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
@@ -153,12 +153,12 @@ export default function DashboardPage({
   return (
     <section className="space-y-5">
       <div className="space-y-6">
-        <Card className="overflow-hidden rounded-[28px] border-border/60 bg-[linear-gradient(135deg,rgba(15,23,42,0.04),rgba(255,255,255,0.96),rgba(14,165,233,0.06))] shadow-sm">
+        <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card shadow-sm">
           <CardContent className="p-5 lg:p-6">
           <div className="space-y-5">
             <div className="space-y-6">
                 <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-600 shadow-sm">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground shadow-sm">
                     <Sparkles className="h-3.5 w-3.5" />
                     Client Management App
                   </div>
@@ -193,7 +193,7 @@ export default function DashboardPage({
                 </div>
               </div>
 
-            <div className="rounded-[28px] bg-white/90 p-5 backdrop-blur lg:p-6">
+            <div className="rounded-[28px] border border-border/50 bg-background/70 p-5 backdrop-blur lg:p-6">
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                   Financial posture
@@ -208,14 +208,14 @@ export default function DashboardPage({
                 </div>
 
               <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                  <div className="space-y-4 rounded-3xl bg-slate-50/90 p-5">
+                  <div className="space-y-4 rounded-3xl border border-border/50 bg-muted/35 p-5">
                     <div className="grid gap-3 lg:grid-cols-2">
                       <SummaryStat label="Gross billing" value={formatGBP(grossBilling)} />
                       <SummaryStat label="Net collected" value={formatGBP(totalPaid)} tone="positive" />
                       <SummaryStat label="Invoice base" value={formatGBP(totalInvoiced)} />
                       <SummaryStat label="Gross-to-net gap" value={formatGBP(grossDelta)} tone="negative" />
                     </div>
-                    <div className="rounded-2xl bg-white/90 p-4">
+                    <div className="rounded-2xl border border-border/50 bg-card p-4">
                       <ProgressBand
                         label="Collection rate"
                         value={collectedRatio}
@@ -275,7 +275,7 @@ export default function DashboardPage({
             <CardTitle className="text-2xl">Workspace load</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 px-6 pb-6 pt-4">
-            <div className="rounded-3xl bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.98))] p-5">
+            <div className="rounded-3xl border border-border/50 bg-muted/35 p-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                   Active portfolio
