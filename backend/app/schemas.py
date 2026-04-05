@@ -1073,6 +1073,7 @@ class SettingsBase(BaseModel):
     tax_policy_next_review_due: Optional[datetime] = None
     tax_policy_review_notes: Optional[str] = None
     other_taxes: list[dict] = []
+    filing_checklist_state: dict = Field(default_factory=dict)
 
 
 class SettingsOut(SettingsBase):
@@ -1143,3 +1144,4 @@ class SettingsUpdate(BaseModel):
     tax_policy_next_review_due: datetime | None = None
     tax_policy_review_notes: str | None = None
     other_taxes: list[dict] | None = None
+    filing_checklist_state: dict | None = None

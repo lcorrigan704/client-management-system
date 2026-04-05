@@ -26,7 +26,7 @@ const emptyInvoice = {
       quantity: 1,
       unit_amount: "",
       tax_code: "standard",
-      tax_rate: 20,
+      tax_rate: 0,
       tax_kind: "vat",
       tax_inclusive: false,
       tax_override: false,
@@ -56,7 +56,7 @@ const emptyQuote = {
       quantity: 1,
       unit_amount: "",
       tax_code: "standard",
-      tax_rate: 20,
+      tax_rate: 0,
       tax_kind: "vat",
       tax_inclusive: false,
       tax_override: false,
@@ -116,7 +116,7 @@ const emptyExpense = {
   title: "",
   amount: "",
   tax_code: "standard",
-  tax_rate: 20,
+  tax_rate: 0,
   tax_kind: "vat",
   tax_inclusive: false,
   vat_reclaimable: false,
@@ -214,6 +214,7 @@ const defaultSettings = {
   tax_policy_next_review_due: null,
   tax_policy_review_notes: "",
   other_taxes: [],
+  filing_checklist_state: {},
 };
 
 export {

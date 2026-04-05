@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+import csv
+import io
 import mimetypes
 from pathlib import Path
 import re
 import sqlite3
+import zipfile
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File, Form
@@ -37,7 +40,6 @@ from .db import (
 from .email_utils import generate_email_draft, send_email_smtp, test_smtp_connection
 from base64 import b64encode, b64decode
 from .security import password_meets_policy, verify_password
-from weasyprint import HTML
 
 
 app = FastAPI(
@@ -1174,73 +1176,238 @@ def filing_pack_summary(period: str = "all", db: Session = Depends(get_db), user
 @app.get("/tax/filing-pack/export")
 def filing_pack_export(
     period: str = "all",
-    format: str = "csv",
+    format: str = "zip",
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    pack = crud.get_filing_pack(db, period=period)
-    filename_base = f"tax-filing-pack-{period}"
-    csv_rows = [
-        "section,key,value",
-        f"meta,mode,{pack['mode']}",
-        f"meta,basis,{pack['basis']}",
-        f"meta,period_start,{pack['period_start'] or ''}",
-        f"meta,period_end,{pack['period_end'] or ''}",
-        f"vat,output_vat,{pack['vat_summary']['output_vat']}",
-        f"vat,input_vat,{pack['vat_summary']['input_vat']}",
-        f"vat,credit_note_vat,{pack['vat_summary']['credit_note_vat']}",
-        f"vat,refund_vat,{pack['vat_summary']['refund_vat']}",
-        f"vat,net_vat_due,{pack['vat_summary']['net_vat_due']}",
-    ]
-    if pack["direct_tax_summary"].get("corporation"):
-        corp = pack["direct_tax_summary"]["corporation"]
-        csv_rows.extend([
-            f"direct_tax,estimated_profit,{corp['estimated_profit']}",
-            f"direct_tax,estimated_tax_due,{corp['estimated_tax_due']}",
-            f"direct_tax,rate,{corp['rate']}",
-        ])
-    if pack["direct_tax_summary"].get("sole_trader"):
-        sole = pack["direct_tax_summary"]["sole_trader"]
-        csv_rows.extend([
-            f"direct_tax,estimated_profit,{sole['estimated_profit']}",
-            f"direct_tax,taxable_profit,{sole['taxable_profit']}",
-            f"direct_tax,estimated_income_tax_due,{sole['estimated_income_tax_due']}",
-            f"direct_tax,estimated_class4_nic_due,{sole['estimated_class4_nic_due']}",
-        ])
+    normalized_period = crud._coerce_period(period)
+    if normalized_period == "all":
+        raise HTTPException(
+            status_code=400,
+            detail="Select a specific financial year before exporting the filing pack.",
+        )
+    if (format or "zip").strip().lower() not in {"zip"}:
+        raise HTTPException(status_code=400, detail="Only ZIP export is supported for filing pack.")
 
-    if format.lower() == "pdf":
-        html = f"""
-        <html><body style="font-family: sans-serif;">
-        <h1>Tax Filing Pack</h1>
-        <p><strong>Mode:</strong> {pack['mode']}</p>
-        <p><strong>Basis:</strong> {pack['basis']}</p>
-        <p><strong>Period:</strong> {pack['period_start'] or '—'} to {pack['period_end'] or '—'}</p>
-        <h2>VAT</h2>
-        <ul>
-          <li>Output VAT: {pack['vat_summary']['output_vat']}</li>
-          <li>Input VAT: {pack['vat_summary']['input_vat']}</li>
-          <li>Credit note VAT: {pack['vat_summary']['credit_note_vat']}</li>
-          <li>Refund VAT: {pack['vat_summary']['refund_vat']}</li>
-          <li>Net VAT due: {pack['vat_summary']['net_vat_due']}</li>
-        </ul>
-        <h2>Direct Tax</h2>
-        <pre>{pack['direct_tax_summary']}</pre>
-        <h2>Assumptions</h2>
-        <pre>{pack['assumptions']}</pre>
-        </body></html>
-        """
-        pdf_bytes = HTML(string=html).write_pdf()
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+    settings_row = crud.get_or_create_settings(db)
+    period_start, period_end = crud._period_bounds(normalized_period, settings_row)
+    invoices = [
+        item
+        for item in db.query(models.Invoice).all()
+        if crud._in_period(item.issued_at, period_start, period_end)
+    ]
+    expenses = [
+        item
+        for item in db.query(models.Expense).all()
+        if crud._in_period(item.incurred_date, period_start, period_end)
+    ]
+
+    def _dt(value):
+        if not value:
+            return ""
+        return value.isoformat()
+
+    def _money(value):
+        return f"{float(value or 0):.2f}"
+
+    def _csv_bytes(headers: list[str], rows: list[list[str]]):
+        stream = io.StringIO()
+        writer = csv.writer(stream)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        return stream.getvalue().encode("utf-8")
+
+    if period_start:
+        folder_name = f"FY{period_start.year}{str((period_start.year + 1) % 100).zfill(2)}"
+    else:
+        folder_name = normalized_period.replace("fy_", "FY")
+    root = f"{folder_name}/"
+
+    invoice_rows = []
+    line_item_rows = []
+    for invoice in sorted(invoices, key=lambda item: (item.issued_at or datetime.min, item.id)):
+        client = getattr(invoice, "client", None)
+        invoice_rows.append(
+            [
+                str(invoice.id),
+                invoice.display_id or "",
+                str(invoice.client_id or ""),
+                getattr(client, "company", None) or getattr(client, "name", None) or "",
+                invoice.title or "",
+                str(invoice.status or "").title(),
+                _dt(invoice.issued_at),
+                _dt(invoice.due_date),
+                _money(invoice.net_amount or invoice.amount),
+                _money(invoice.tax_amount),
+                _money(invoice.gross_amount or invoice.amount),
+                _money(invoice.amount),
+                invoice.notes or "",
+            ]
+        )
+        for line in invoice.line_items or []:
+            line_item_rows.append(
+                [
+                    str(invoice.id),
+                    invoice.display_id or "",
+                    str(line.id),
+                    line.description or "",
+                    str(float(line.quantity or 0)),
+                    _money(line.unit_amount),
+                    _money(line.net_amount),
+                    _money(line.tax_amount),
+                    _money(line.gross_amount),
+                    str(line.tax_code or ""),
+                    str(float(line.tax_rate or 0)),
+                    str(line.tax_kind or ""),
+                    "inclusive" if bool(line.tax_inclusive) else "exclusive",
+                ]
+            )
+
+    expense_rows = []
+    receipt_rows = []
+    receipt_binary_items: list[tuple[str, bytes]] = []
+    used_receipt_names: set[str] = set()
+    for expense in sorted(expenses, key=lambda item: (item.incurred_date or datetime.min, item.id)):
+        client = getattr(expense, "client", None)
+        expense_rows.append(
+            [
+                str(expense.id),
+                expense.display_id or "",
+                str(expense.client_id or ""),
+                getattr(client, "company", None) or getattr(client, "name", None) or "",
+                expense.title or "",
+                _dt(expense.incurred_date),
+                _money(expense.net_amount or expense.amount),
+                _money(expense.tax_amount),
+                _money(expense.gross_amount or expense.amount),
+                str(expense.tax_code or ""),
+                str(float(expense.tax_rate or 0)),
+                str(expense.tax_kind or ""),
+                "inclusive" if bool(expense.tax_inclusive) else "exclusive",
+                "yes" if bool(expense.vat_reclaimable) else "no",
+                expense.notes or "",
+            ]
+        )
+        for receipt in expense.receipts or []:
+            receipt_name = _next_unique_filename(
+                receipt.filename or Path(receipt.file_path or "").name or "receipt",
+                used_receipt_names,
+            )
+            receipt_rows.append(
+                [
+                    str(expense.id),
+                    expense.display_id or "",
+                    str(receipt.id),
+                    receipt.filename or "",
+                    receipt.file_path or "",
+                    f"receipts/{receipt_name}",
+                ]
+            )
+            payload = _load_upload_attachment(receipt.file_path or "")
+            if payload is not None:
+                receipt_binary_items.append((receipt_name, payload))
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            f"{root}invoices/invoices.csv",
+            _csv_bytes(
+                [
+                    "id",
+                    "display_id",
+                    "client_id",
+                    "client_name",
+                    "title",
+                    "status",
+                    "issued_at",
+                    "due_date",
+                    "net_amount",
+                    "tax_amount",
+                    "gross_amount",
+                    "amount",
+                    "notes",
+                ],
+                invoice_rows,
+            ),
+        )
+        archive.writestr(
+            f"{root}invoices/invoice_line_items.csv",
+            _csv_bytes(
+                [
+                    "invoice_id",
+                    "invoice_display_id",
+                    "line_item_id",
+                    "description",
+                    "quantity",
+                    "unit_amount",
+                    "net_amount",
+                    "tax_amount",
+                    "gross_amount",
+                    "tax_code",
+                    "tax_rate",
+                    "tax_kind",
+                    "tax_mode",
+                ],
+                line_item_rows,
+            ),
+        )
+        archive.writestr(
+            f"{root}expenses/expenses.csv",
+            _csv_bytes(
+                [
+                    "id",
+                    "display_id",
+                    "client_id",
+                    "client_name",
+                    "title",
+                    "incurred_date",
+                    "net_amount",
+                    "tax_amount",
+                    "gross_amount",
+                    "tax_code",
+                    "tax_rate",
+                    "tax_kind",
+                    "tax_mode",
+                    "vat_reclaimable",
+                    "notes",
+                ],
+                expense_rows,
+            ),
+        )
+        archive.writestr(
+            f"{root}expenses/expense_receipts.csv",
+            _csv_bytes(
+                [
+                    "expense_id",
+                    "expense_display_id",
+                    "receipt_id",
+                    "filename",
+                    "file_path",
+                    "bundle_path",
+                ],
+                receipt_rows,
+            ),
+        )
+        archive.writestr(
+            f"{root}expenses/receipts/README.txt",
+            "Put expense receipt files in this folder if missing from export.",
+        )
+        for receipt_name, payload in receipt_binary_items:
+            archive.writestr(f"{root}expenses/receipts/{receipt_name}", payload)
+        archive.writestr(
+            f"{root}bank-statements/README.txt",
+            "Place bank statements for this filing period in this folder.",
+        )
+        archive.writestr(
+            f"{root}P60s/README.txt",
+            "Place payroll/P60 documents for this filing period in this folder.",
         )
 
-    csv_text = "\n".join(csv_rows)
+    zip_filename = f"tax-filing-pack-{folder_name}.zip"
     return Response(
-        content=csv_text.encode("utf-8"),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename_base}.csv"'},
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
     )
 
 

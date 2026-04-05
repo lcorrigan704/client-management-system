@@ -754,6 +754,7 @@ class Settings(WorkspaceScoped, Base):
     tax_policy_next_review_due: Mapped[datetime | None] = mapped_column(DateTime)
     tax_policy_review_notes: Mapped[str | None] = mapped_column(Text())
     other_taxes: Mapped[list[dict] | None] = mapped_column(JSON, default=list)
+    filing_checklist_state: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
 
 class TaxRateCatalog(WorkspaceScoped, Base):
