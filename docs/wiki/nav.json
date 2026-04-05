@@ -1,0 +1,28 @@
+{
+  "title": "Client Management System Wiki",
+  "pages": [
+    {"title": "Home", "file": "Home.md", "group": "Core"},
+    {"title": "Getting Started", "file": "Getting-Started.md", "group": "Core"},
+    {"title": "Navigation and Financial Year Filter", "file": "Navigation-and-Financial-Year-Filter.md", "group": "Core"},
+    {"title": "Onboarding and Authentication", "file": "Onboarding-and-Authentication.md", "group": "Core"},
+
+    {"title": "Workspace Management", "file": "Workspace-Management.md", "group": "Workspaces"},
+    {"title": "Clients", "file": "Clients.md", "group": "Entities"},
+    {"title": "Invoices", "file": "Invoices.md", "group": "Entities"},
+    {"title": "Quotes", "file": "Quotes.md", "group": "Entities"},
+    {"title": "Revenue Adjustments", "file": "Revenue-Adjustments.md", "group": "Entities"},
+    {"title": "Service Agreements", "file": "Service-Agreements.md", "group": "Entities"},
+    {"title": "Proposals", "file": "Proposals.md", "group": "Entities"},
+    {"title": "Expenses", "file": "Expenses.md", "group": "Entities"},
+
+    {"title": "Emails Workspace", "file": "Emails-Workspace.md", "group": "Operations"},
+    {"title": "Tax Workspace", "file": "Tax-Workspace.md", "group": "Operations"},
+    {"title": "Settings", "file": "Settings.md", "group": "Operations"},
+    {"title": "Danger Zone", "file": "Danger-Zone.md", "group": "Operations"},
+
+    {"title": "Troubleshooting and FAQ", "file": "Troubleshooting-and-FAQ.md", "group": "Support"},
+    {"title": "Operations Runbook", "file": "Operations-Runbook.md", "group": "Support"},
+    {"title": "Documentation Standards", "file": "Documentation-Standards.md", "group": "Docs"},
+    {"title": "Docs Freshness", "file": "Docs-Freshness.md", "group": "Docs"}
+  ]
+}
