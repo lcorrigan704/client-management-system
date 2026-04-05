@@ -83,7 +83,21 @@ export default function App() {
     []
   );
 
-  const { user, needsSetup, loading, login, setup, logout } = useAuth();
+  const {
+    user,
+    activeWorkspace,
+    workspaceRole,
+    workspaces,
+    needsSetup,
+    loading,
+    login,
+    setup,
+    logout,
+    switchWorkspace,
+    createWorkspace,
+    setDefaultWorkspace,
+    updateWorkspace,
+  } = useAuth();
 
   const {
     clients,
@@ -281,9 +295,9 @@ export default function App() {
     setEditingUserId(null);
   };
 
-  const handleBackup = useCallback(async ({ download, store }) => {
+  const handleBackup = useCallback(async ({ download, store, scope = "workspace" }) => {
     try {
-      const response = await api.createBackup({ download, store });
+      const response = await api.createBackup({ download, store, scope });
       if (download && response?.blob) {
         const { blob, filename } = response;
         const url = URL.createObjectURL(blob);
@@ -340,9 +354,9 @@ export default function App() {
     resetQuoteForm,
   ]);
 
-  const handleResetWorkspace = useCallback(async () => {
+  const handleResetWorkspace = useCallback(async (workspaceNameConfirm) => {
     try {
-      await api.resetWorkspace();
+      await api.resetWorkspace(workspaceNameConfirm);
       handleSettingsSaved("Workspace reset. Reloading...");
       setTimeout(() => window.location.reload(), 800);
     } catch (error) {
@@ -360,9 +374,9 @@ export default function App() {
   }, [handleSettingsError]);
 
   const handleRestoreBackup = useCallback(
-    async (filename) => {
+    async (filename, workspaceName) => {
       try {
-        await api.restoreBackup(filename);
+        await api.restoreBackup(filename, workspaceName);
         handleSettingsSaved("Backup restored. Reloading...");
         setTimeout(() => window.location.reload(), 800);
       } catch (error) {
@@ -373,9 +387,9 @@ export default function App() {
   );
 
   const handleRestoreUpload = useCallback(
-    async (file) => {
+    async (file, workspaceName) => {
       try {
-        await api.restoreBackupUpload(file);
+        await api.restoreBackupUpload(file, workspaceName);
         handleSettingsSaved("Backup restored. Reloading...");
         setTimeout(() => window.location.reload(), 800);
       } catch (error) {
@@ -386,14 +400,15 @@ export default function App() {
   );
 
   const loadUsers = useCallback(async () => {
-    if (!user || user.role !== "owner") return;
+    const role = workspaceRole || user?.role;
+    if (!user || role !== "owner") return;
     try {
       const data = await api.listUsers();
       setUsers(data);
     } catch (error) {
       handleLoadError(error);
     }
-  }, [handleLoadError, user]);
+  }, [handleLoadError, user, workspaceRole]);
 
   const loadAssignableUsers = useCallback(async () => {
     if (!user) return;
@@ -406,12 +421,13 @@ export default function App() {
   }, [handleLoadError, user]);
 
   useEffect(() => {
-    if (user?.role === "owner") {
+    const role = workspaceRole || user?.role;
+    if (role === "owner") {
       loadUsers();
     } else {
       setUsers([]);
     }
-  }, [loadUsers, user]);
+  }, [loadUsers, workspaceRole, user?.role]);
 
   useEffect(() => {
     loadAssignableUsers();
@@ -1638,11 +1654,21 @@ export default function App() {
     );
   }
 
-  const canManageSettings = user.role !== "user";
+  const effectiveRole = workspaceRole || user.role;
+  const canManageSettings = effectiveRole !== "user";
 
   return (
     <AppShell
-      companyName={settings?.company_name || "Your Company"}
+      companyName={activeWorkspace?.name || settings?.company_name || "Your Company"}
+      workspaces={workspaces}
+      activeWorkspace={activeWorkspace}
+      onSwitchWorkspace={async (workspaceId) => {
+        await switchWorkspace(workspaceId);
+        await loadAll();
+      }}
+      onCreateWorkspace={createWorkspace}
+      onSetDefaultWorkspace={setDefaultWorkspace}
+      onUpdateWorkspace={updateWorkspace}
       navGroups={navGroups}
       view={view}
       navigateTo={navigateTo}
@@ -1652,7 +1678,7 @@ export default function App() {
       formatFinancialYearLabel={formatFinancialYearLabel}
       logout={logout}
       canManageSettings={canManageSettings}
-      isOwner={user?.role === "owner"}
+      isOwner={effectiveRole === "owner"}
       userEmail={user?.email}
     >
       <div className="app-view-transition" data-nav-direction={navDirection}>
@@ -1843,6 +1869,7 @@ export default function App() {
         {view === VIEWS.SETTINGS && canManageSettings && (
           <SettingsPage
             settings={settings}
+            activeWorkspaceName={activeWorkspace?.name || settings?.company_name || "Workspace"}
             updateSettings={updateSettings}
             onSaveSettings={saveSettings}
             onSaveSmtp={saveSettings}

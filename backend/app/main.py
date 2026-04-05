@@ -2,9 +2,11 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import mimetypes
 from pathlib import Path
+import re
+import sqlite3
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,9 +15,25 @@ from sqlalchemy.orm import Session
 from sqlalchemy import inspect
 
 from . import crud, models, schemas
-from .auth import clear_session, create_session, get_current_user, require_role, require_user
+from .auth import (
+    clear_session,
+    create_session,
+    get_current_session,
+    get_current_user,
+    require_role,
+    require_user,
+    require_workspace_context,
+    resolve_workspace_context,
+)
 from .config import settings
-from .db import Base, engine, get_db, SessionLocal
+from .db import (
+    Base,
+    engine,
+    get_db,
+    SessionLocal,
+    reset_current_workspace_id,
+    set_current_workspace_id,
+)
 from .email_utils import generate_email_draft, send_email_smtp, test_smtp_connection
 from base64 import b64encode, b64decode
 from .security import password_meets_policy, verify_password
@@ -38,6 +56,34 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_UPLOAD_BYTES = settings.max_upload_mb * 1024 * 1024
 _login_rate_cache: dict[str, dict[str, datetime | int]] = {}
+WORKSPACE_SCOPED_TABLES = [
+    "clients",
+    "invoices",
+    "quotes",
+    "invoice_line_items",
+    "quote_line_items",
+    "credit_notes",
+    "credit_note_line_items",
+    "refunds",
+    "service_agreements",
+    "agreement_slas",
+    "agreement_versions",
+    "agreement_version_comments",
+    "agreement_version_comment_reactions",
+    "proposals",
+    "proposal_requirements",
+    "proposal_attachments",
+    "proposal_versions",
+    "proposal_version_comments",
+    "proposal_version_comment_reactions",
+    "expenses",
+    "expense_receipts",
+    "settings",
+    "tax_rate_catalogs",
+    "email_logs",
+    "invoice_payments",
+    "payment_tax_allocations",
+]
 
 
 def _resolve_db_path() -> Path:
@@ -111,6 +157,106 @@ def _restore_from_archive(archive_path: Path):
             _clear_uploads()
             shutil.copytree(extracted_uploads, UPLOADS_DIR, dirs_exist_ok=True)
 
+
+def _slugify_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return cleaned or "workspace"
+
+
+def _create_sqlite_snapshot(source_db: Path, target_db: Path):
+    source_conn = sqlite3.connect(str(source_db))
+    try:
+        target_conn = sqlite3.connect(str(target_db))
+        try:
+            source_conn.backup(target_conn)
+        finally:
+            target_conn.close()
+    finally:
+        source_conn.close()
+
+
+def _create_workspace_sqlite_snapshot(source_db: Path, target_db: Path, workspace_id: int):
+    _create_sqlite_snapshot(source_db, target_db)
+    conn = sqlite3.connect(str(target_db))
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA foreign_keys=OFF")
+        for table_name in WORKSPACE_SCOPED_TABLES:
+            cur.execute(f"DELETE FROM {table_name} WHERE workspace_id != ?", (workspace_id,))
+        cur.execute("DELETE FROM workspace_memberships WHERE workspace_id != ?", (workspace_id,))
+        cur.execute("DELETE FROM workspaces WHERE id != ?", (workspace_id,))
+        cur.execute("SELECT DISTINCT user_id FROM workspace_memberships WHERE workspace_id = ?", (workspace_id,))
+        user_ids = [row[0] for row in cur.fetchall()]
+        if user_ids:
+            placeholders = ",".join("?" for _ in user_ids)
+            cur.execute(f"DELETE FROM users WHERE id NOT IN ({placeholders})", tuple(user_ids))
+            cur.execute(
+                f"DELETE FROM user_sessions WHERE user_id NOT IN ({placeholders})",
+                tuple(user_ids),
+            )
+            cur.execute(
+                "UPDATE user_sessions SET active_workspace_id = ? WHERE user_id IN "
+                f"({placeholders})",
+                tuple([workspace_id, *user_ids]),
+            )
+        else:
+            cur.execute("DELETE FROM users")
+            cur.execute("DELETE FROM user_sessions")
+        cur.execute("PRAGMA foreign_keys=ON")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _workspace_upload_paths(db: Session, workspace_id: int) -> set[str]:
+    proposal_paths = (
+        db.query(models.ProposalAttachment.file_path)
+        .filter(models.ProposalAttachment.workspace_id == workspace_id)
+        .all()
+    )
+    receipt_paths = (
+        db.query(models.ExpenseReceipt.file_path)
+        .filter(models.ExpenseReceipt.workspace_id == workspace_id)
+        .all()
+    )
+    return {
+        str(path)
+        for (path,) in [*proposal_paths, *receipt_paths]
+        if path
+    }
+
+
+def _delete_upload_paths(paths: set[str]):
+    for relative in paths:
+        clean = str(relative).strip()
+        if clean.startswith("uploads/"):
+            clean = clean[len("uploads/"):]
+        target = (UPLOADS_DIR / clean).resolve()
+        try:
+            target.relative_to(UPLOADS_DIR.resolve())
+        except ValueError:
+            continue
+        if target.exists() and target.is_file():
+            target.unlink(missing_ok=True)
+
+
+def _copy_workspace_uploads_to_temp(paths: set[str], destination: Path):
+    destination.mkdir(parents=True, exist_ok=True)
+    for relative in paths:
+        clean = str(relative).strip()
+        if clean.startswith("uploads/"):
+            clean = clean[len("uploads/"):]
+        source = (UPLOADS_DIR / clean).resolve()
+        try:
+            source.relative_to(UPLOADS_DIR.resolve())
+        except ValueError:
+            continue
+        if not source.exists() or not source.is_file():
+            continue
+        target = destination / clean
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
 allowed_origins = [
     origin.strip()
     for origin in settings.allowed_origins.split(",")
@@ -149,14 +295,31 @@ async def auth_gate(request: Request, call_next):
     if request.method == "OPTIONS" or request.url.path in _AUTH_ALLOWLIST:
         return await call_next(request)
     db = SessionLocal()
+    workspace_token = None
+    context_error = None
     try:
-        user = get_current_user(request, db)
+        session = get_current_session(request, db)
+        user = session.user if session else None
+        if user:
+            try:
+                context = resolve_workspace_context(db, user, session)
+            except HTTPException as exc:
+                context_error = exc
+            else:
+                request.state.workspace_context = context
+                workspace_token = set_current_workspace_id(context.workspace.id)
     finally:
         db.close()
     if not user:
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    if context_error:
+        return JSONResponse(status_code=context_error.status_code, content={"detail": context_error.detail})
     request.state.user = user
-    return await call_next(request)
+    try:
+        return await call_next(request)
+    finally:
+        if workspace_token is not None:
+            reset_current_workspace_id(workspace_token)
 
 
 @app.get("/health")
@@ -191,9 +354,13 @@ def test_smtp(user=Depends(require_role(["owner", "admin"]))):
 
 
 @app.post("/admin/backup")
-def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["owner", "admin"]))):
+def create_backup(
+    payload: schemas.BackupRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner", "admin"])),
+    context=Depends(require_workspace_context),
+):
     import tarfile
-    from datetime import datetime
     import tempfile
 
     source_db = _resolve_db_path()
@@ -203,8 +370,12 @@ def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["ow
     if not payload.download and not payload.store:
         raise HTTPException(status_code=400, detail="Select download and/or store.")
 
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d")
-    backup_name = f"cms-{timestamp}.tar.gz"
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    workspace_part = _slugify_filename_part(context.workspace.name)
+    if payload.scope == "tenant":
+        backup_name = f"cms-tenant-{timestamp}.tar.gz"
+    else:
+        backup_name = f"cms-workspace-{workspace_part}-{timestamp}.tar.gz"
 
     if payload.store:
         backup_path = BACKUP_DIR / backup_name
@@ -213,10 +384,34 @@ def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["ow
         backup_path = Path(temp_file.name)
         temp_file.close()
 
-    with tarfile.open(backup_path, "w:gz") as tar:
-        tar.add(str(source_db), arcname="app.db")
-        if UPLOADS_DIR.exists():
-            tar.add(str(UPLOADS_DIR), arcname="uploads")
+    with tempfile.NamedTemporaryFile(prefix="cms-db-snapshot-", suffix=".db", delete=False) as snapshot_file:
+        snapshot_path = Path(snapshot_file.name)
+    workspace_upload_dir = Path(
+        tempfile.mkdtemp(prefix="cms-workspace-uploads-")
+    ) if payload.scope == "workspace" else None
+    try:
+        if payload.scope == "workspace":
+            _create_workspace_sqlite_snapshot(source_db, snapshot_path, context.workspace.id)
+        else:
+            _create_sqlite_snapshot(source_db, snapshot_path)
+        with tarfile.open(backup_path, "w:gz") as tar:
+            tar.add(str(snapshot_path), arcname="app.db")
+            if payload.scope == "workspace":
+                upload_paths = _workspace_upload_paths(db, context.workspace.id)
+                if workspace_upload_dir is not None:
+                    _copy_workspace_uploads_to_temp(upload_paths, workspace_upload_dir)
+                    tar.add(str(workspace_upload_dir), arcname="uploads")
+            elif UPLOADS_DIR.exists():
+                tar.add(str(UPLOADS_DIR), arcname="uploads")
+    finally:
+        snapshot_path.unlink(missing_ok=True)
+        if workspace_upload_dir and workspace_upload_dir.exists():
+            for path in sorted(workspace_upload_dir.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+                elif path.is_dir():
+                    path.rmdir()
+            workspace_upload_dir.rmdir()
 
     if payload.download:
         background = None
@@ -229,7 +424,7 @@ def create_backup(payload: schemas.BackupRequest, user=Depends(require_role(["ow
             background=background,
         )
 
-    return {"status": "stored", "filename": backup_name}
+    return {"status": "stored", "filename": backup_name, "scope": payload.scope}
 
 
 @app.get("/admin/backups")
@@ -242,16 +437,43 @@ def list_backups(user=Depends(require_role(["owner", "admin"]))):
 
 
 @app.post("/admin/restore")
-def restore_backup(payload: schemas.RestoreRequest, user=Depends(require_role(["owner", "admin"]))):
+def restore_backup(
+    payload: schemas.RestoreRequest,
+    user=Depends(require_role(["owner", "admin"])),
+):
+    if not payload.workspace_name.strip():
+        raise HTTPException(status_code=400, detail="Workspace name is required.")
     archive_path = BACKUP_DIR / payload.filename
     _restore_from_archive(archive_path)
-    return {"status": "restored", "source": "server", "filename": payload.filename}
+    db = SessionLocal()
+    try:
+        workspace = db.query(models.Workspace).order_by(models.Workspace.id.asc()).first()
+        if workspace:
+            workspace.name = payload.workspace_name.strip()
+            workspace.slug = crud._ensure_workspace_slug(
+                db, payload.workspace_name.strip(), exclude_workspace_id=workspace.id
+            )
+            db.commit()
+    finally:
+        db.close()
+    return {
+        "status": "restored",
+        "source": "server",
+        "filename": payload.filename,
+        "workspace_name": payload.workspace_name.strip(),
+    }
 
 
 @app.post("/admin/restore/upload")
-def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_role(["owner", "admin"]))):
+def restore_backup_upload(
+    file: UploadFile = File(...),
+    workspace_name: str = Form(...),
+    user=Depends(require_role(["owner", "admin"])),
+):
     import tempfile
     filename = file.filename or ""
+    if not workspace_name.strip():
+        raise HTTPException(status_code=400, detail="Workspace name is required.")
     if not filename.endswith(".tar.gz"):
         raise HTTPException(status_code=400, detail="Only .tar.gz backups are supported.")
     temp_file = tempfile.NamedTemporaryFile(prefix="cms-restore-", suffix=".tar.gz", delete=False)
@@ -262,68 +484,90 @@ def restore_backup_upload(file: UploadFile = File(...), user=Depends(require_rol
         _restore_from_archive(temp_path)
     finally:
         temp_path.unlink(missing_ok=True)
-    return {"status": "restored", "source": "upload"}
+    db = SessionLocal()
+    try:
+        workspace = db.query(models.Workspace).order_by(models.Workspace.id.asc()).first()
+        if workspace:
+            workspace.name = workspace_name.strip()
+            workspace.slug = crud._ensure_workspace_slug(
+                db, workspace_name.strip(), exclude_workspace_id=workspace.id
+            )
+            db.commit()
+    finally:
+        db.close()
+    return {"status": "restored", "source": "upload", "workspace_name": workspace_name.strip()}
 
 
 @app.post("/admin/reset")
-def reset_data(db: Session = Depends(get_db), user=Depends(require_role(["owner", "admin"]))):
-    db.query(models.AgreementVersionCommentReaction).delete()
-    db.query(models.AgreementVersionComment).delete()
-    db.query(models.ProposalVersionCommentReaction).delete()
-    db.query(models.ProposalVersionComment).delete()
-    db.query(models.ServiceAgreementVersion).delete()
-    db.query(models.ProposalVersion).delete()
-    db.query(models.ExpenseReceipt).delete()
-    db.query(models.ProposalAttachment).delete()
-    db.query(models.ProposalRequirement).delete()
-    db.query(models.ServiceAgreementSLA).delete()
-    db.query(models.InvoiceLineItem).delete()
-    db.query(models.QuoteLineItem).delete()
-    db.query(models.Proposal).delete()
-    db.query(models.ServiceAgreement).delete()
-    db.query(models.Invoice).delete()
-    db.query(models.Quote).delete()
-    db.query(models.Expense).delete()
-    db.query(models.Client).delete()
+def reset_data(
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner", "admin"])),
+    context=Depends(require_workspace_context),
+):
+    workspace_id = context.workspace.id
+    upload_paths = _workspace_upload_paths(db, workspace_id)
+    db.query(models.AgreementVersionCommentReaction).filter(models.AgreementVersionCommentReaction.workspace_id == workspace_id).delete()
+    db.query(models.AgreementVersionComment).filter(models.AgreementVersionComment.workspace_id == workspace_id).delete()
+    db.query(models.ProposalVersionCommentReaction).filter(models.ProposalVersionCommentReaction.workspace_id == workspace_id).delete()
+    db.query(models.ProposalVersionComment).filter(models.ProposalVersionComment.workspace_id == workspace_id).delete()
+    db.query(models.ServiceAgreementVersion).filter(models.ServiceAgreementVersion.workspace_id == workspace_id).delete()
+    db.query(models.ProposalVersion).filter(models.ProposalVersion.workspace_id == workspace_id).delete()
+    db.query(models.ExpenseReceipt).filter(models.ExpenseReceipt.workspace_id == workspace_id).delete()
+    db.query(models.ProposalAttachment).filter(models.ProposalAttachment.workspace_id == workspace_id).delete()
+    db.query(models.ProposalRequirement).filter(models.ProposalRequirement.workspace_id == workspace_id).delete()
+    db.query(models.ServiceAgreementSLA).filter(models.ServiceAgreementSLA.workspace_id == workspace_id).delete()
+    db.query(models.InvoiceLineItem).filter(models.InvoiceLineItem.workspace_id == workspace_id).delete()
+    db.query(models.QuoteLineItem).filter(models.QuoteLineItem.workspace_id == workspace_id).delete()
+    db.query(models.Proposal).filter(models.Proposal.workspace_id == workspace_id).delete()
+    db.query(models.ServiceAgreement).filter(models.ServiceAgreement.workspace_id == workspace_id).delete()
+    db.query(models.Invoice).filter(models.Invoice.workspace_id == workspace_id).delete()
+    db.query(models.Quote).filter(models.Quote.workspace_id == workspace_id).delete()
+    db.query(models.Expense).filter(models.Expense.workspace_id == workspace_id).delete()
+    db.query(models.Client).filter(models.Client.workspace_id == workspace_id).delete()
     db.commit()
+    _delete_upload_paths(upload_paths)
 
-    if UPLOADS_DIR.exists():
-        for item in UPLOADS_DIR.iterdir():
-            if item.name == ".gitkeep":
-                continue
-            if item.is_file():
-                item.unlink()
-            elif item.is_dir():
-                for child in item.rglob("*"):
-                    if child.is_file():
-                        child.unlink()
-                for child in sorted(item.rglob("*"), reverse=True):
-                    if child.is_dir():
-                        child.rmdir()
-                item.rmdir()
-
-    return {"status": "reset"}
+    return {"status": "reset", "workspace_id": workspace_id}
 
 
 @app.post("/admin/reset-workspace")
-def reset_workspace(db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
-    # Remove business data first.
-    reset_data(db, user)
-
-    # Remove auth/session data and settings.
-    db.query(models.UserSession).delete()
-    db.query(models.User).delete()
-    db.query(models.Settings).delete()
+def reset_workspace(
+    payload: schemas.ResetWorkspaceRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner"])),
+    context=Depends(require_workspace_context),
+):
+    workspace = crud.get_workspace(db, context.workspace.id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if payload.workspace_name_confirm.strip() != workspace.name.strip():
+        raise HTTPException(status_code=400, detail="Workspace name confirmation does not match.")
+    total_workspaces = db.query(models.Workspace).count()
+    if total_workspaces <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last remaining workspace.")
+    upload_paths = _workspace_upload_paths(db, workspace.id)
+    db.delete(workspace)
     db.commit()
-
-    return {"status": "workspace_reset"}
+    _delete_upload_paths(upload_paths)
+    return {"status": "workspace_reset", "workspace_id": context.workspace.id}
 
 
 @app.get("/auth/status", response_model=schemas.AuthStatus)
 def auth_status(request: Request, db: Session = Depends(get_db)):
     needs_setup = db.query(models.User).count() == 0
     user = get_current_user(request, db) if request else None
-    return schemas.AuthStatus(needs_setup=needs_setup, user=user)
+    if not user:
+        return schemas.AuthStatus(needs_setup=needs_setup, user=None, workspaces=[])
+    session = get_current_session(request, db) if request else None
+    context = resolve_workspace_context(db, user, session) if session else None
+    workspaces = crud.list_workspaces_for_user(db, user.id)
+    return schemas.AuthStatus(
+        needs_setup=needs_setup,
+        user=user,
+        active_workspace=context.workspace if context else None,
+        workspace_role=context.membership.role if context else None,
+        workspaces=workspaces,
+    )
 
 
 @app.post("/auth/setup", response_model=schemas.AuthStatus)
@@ -345,10 +589,22 @@ def auth_setup(payload: schemas.AuthSetupRequest, response: Response, db: Sessio
     settings_data = payload.model_dump(exclude_none=True)
     settings_data.pop("owner_email", None)
     settings_data.pop("password", None)
+    workspace_name = (payload.company_name or "").strip() or "Primary Workspace"
+    workspace = crud.create_workspace(
+        db,
+        schemas.WorkspaceCreate(name=workspace_name, set_default=True),
+        user,
+    )
     settings_payload = schemas.SettingsUpdate(**settings_data)
-    crud.update_settings(db, settings_payload)
-    create_session(response, db, user)
-    return schemas.AuthStatus(needs_setup=False, user=user)
+    crud.update_settings(db, settings_payload, workspace_id=workspace.id)
+    create_session(response, db, user, active_workspace_id=workspace.id)
+    return schemas.AuthStatus(
+        needs_setup=False,
+        user=user,
+        active_workspace=workspace,
+        workspace_role="owner",
+        workspaces=crud.list_workspaces_for_user(db, user.id),
+    )
 
 
 def _get_client_ip(request: Request) -> str:
@@ -382,8 +638,17 @@ def auth_login(payload: schemas.AuthLoginRequest, response: Response, request: R
         raise HTTPException(status_code=401, detail="Invalid credentials.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User is inactive.")
-    create_session(response, db, user)
-    return schemas.AuthStatus(needs_setup=False, user=user)
+    memberships = crud.list_workspaces_for_user(db, user.id)
+    default_membership = next((item for item in memberships if item.is_default), None) or (memberships[0] if memberships else None)
+    active_workspace_id = default_membership.workspace_id if default_membership else None
+    create_session(response, db, user, active_workspace_id=active_workspace_id)
+    return schemas.AuthStatus(
+        needs_setup=False,
+        user=user,
+        active_workspace=default_membership.workspace if default_membership else None,
+        workspace_role=default_membership.role if default_membership else None,
+        workspaces=memberships,
+    )
 
 
 @app.post("/auth/logout")
@@ -392,14 +657,144 @@ def auth_logout(response: Response, request: Request, db: Session = Depends(get_
     return {"status": "ok"}
 
 
+@app.get("/workspaces", response_model=list[schemas.WorkspaceMembershipOut])
+def list_workspaces(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    return crud.list_workspaces_for_user(db, user.id)
+
+
+@app.post("/workspaces", response_model=schemas.WorkspaceOut)
+def create_workspace(
+    payload: schemas.WorkspaceCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner", "admin"])),
+):
+    return crud.create_workspace(db, payload, user)
+
+
+@app.patch("/workspaces/{workspace_id}", response_model=schemas.WorkspaceOut)
+def update_workspace(
+    workspace_id: int,
+    payload: schemas.WorkspaceUpdate,
+    db: Session = Depends(get_db),
+    context=Depends(require_workspace_context),
+):
+    if context.membership.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    workspace = crud.get_workspace(db, workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    membership = crud.get_workspace_membership(db, workspace_id, context.user.id)
+    if not membership or not membership.is_active:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return crud.update_workspace(db, workspace, payload)
+
+
+@app.post("/workspaces/switch", response_model=schemas.WorkspaceSwitchResponse)
+def switch_workspace(
+    payload: schemas.WorkspaceSwitchRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    session = get_current_session(request, db)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    membership = crud.get_workspace_membership(db, payload.workspace_id, user.id)
+    if not membership or not membership.is_active:
+        raise HTTPException(status_code=403, detail="No access to workspace")
+    workspace = membership.workspace
+    if not workspace or not workspace.is_active:
+        raise HTTPException(status_code=403, detail="Workspace is inactive")
+    crud.set_session_active_workspace(db, session, workspace.id)
+    return schemas.WorkspaceSwitchResponse(
+        active_workspace=workspace,
+        membership_role=membership.role,
+    )
+
+
+@app.post("/workspaces/{workspace_id}/set-default", response_model=schemas.WorkspaceMembershipOut)
+def set_default_workspace(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    membership = crud.get_workspace_membership(db, workspace_id, user.id)
+    if not membership or not membership.is_active:
+        raise HTTPException(status_code=403, detail="No access to workspace")
+    updated = crud.set_default_workspace(db, user.id, workspace_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Workspace membership not found")
+    return updated
+
+
+@app.get("/workspaces/{workspace_id}/members", response_model=list[schemas.WorkspaceMembershipOut])
+def list_workspace_members(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    context=Depends(require_workspace_context),
+):
+    membership = crud.get_workspace_membership(db, workspace_id, context.user.id)
+    if not membership or not membership.is_active:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if context.membership.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return crud.list_workspace_members(db, workspace_id)
+
+
+@app.put("/workspaces/{workspace_id}/members/{user_id}", response_model=schemas.WorkspaceMembershipOut)
+def update_workspace_member(
+    workspace_id: int,
+    user_id: int,
+    payload: schemas.WorkspaceMembershipUpdate,
+    db: Session = Depends(get_db),
+    context=Depends(require_workspace_context),
+):
+    if context.membership.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    actor_membership = crud.get_workspace_membership(db, workspace_id, context.user.id)
+    if not actor_membership or not actor_membership.is_active:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    membership = crud.get_workspace_membership(db, workspace_id, user_id)
+    if not membership:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return crud.update_workspace_membership(db, membership, payload)
+
+
+@app.delete("/workspaces/{workspace_id}/members/{user_id}")
+def delete_workspace_member(
+    workspace_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    context=Depends(require_workspace_context),
+):
+    if context.membership.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    membership = crud.get_workspace_membership(db, workspace_id, user_id)
+    if not membership:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    crud.delete_workspace_membership(db, membership)
+    return {"status": "deleted"}
+
+
 @app.get("/auth/users", response_model=list[schemas.UserOut])
-def list_users(db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
-    return crud.list_users(db)
+def list_users(
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner"])),
+    context=Depends(require_workspace_context),
+):
+    return crud.list_users(db, workspace_id=context.workspace.id)
 
 
 @app.get("/auth/users/assignable", response_model=list[schemas.UserOut])
-def list_assignable_users(db: Session = Depends(get_db), user=Depends(require_user)):
-    return crud.list_active_users(db)
+def list_assignable_users(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+    context=Depends(require_workspace_context),
+):
+    return crud.list_active_users(db, workspace_id=context.workspace.id)
 
 
 @app.get("/auth/users/search", response_model=list[schemas.UserSearchOut])
@@ -407,13 +802,19 @@ def search_users(
     q: str,
     db: Session = Depends(get_db),
     user=Depends(require_user),
+    context=Depends(require_workspace_context),
 ):
     term = q.strip()
     if not term:
         return []
     results = (
         db.query(models.User)
+        .join(models.WorkspaceMembership, models.WorkspaceMembership.user_id == models.User.id)
         .filter(models.User.is_active == True)  # noqa: E712
+        .filter(
+            models.WorkspaceMembership.workspace_id == context.workspace.id,
+            models.WorkspaceMembership.is_active == True,  # noqa: E712
+        )
         .filter(models.User.email.ilike(f"%{term}%"))
         .order_by(models.User.email.asc())
         .limit(10)
@@ -423,18 +824,46 @@ def search_users(
 
 
 @app.post("/auth/users", response_model=schemas.UserOut)
-def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
+def create_user(
+    payload: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner"])),
+    context=Depends(require_workspace_context),
+):
     if not password_meets_policy(payload.password):
         raise HTTPException(status_code=400, detail="Password does not meet requirements.")
-    if crud.get_user_by_email(db, payload.email):
-        raise HTTPException(status_code=400, detail="User already exists.")
-    return crud.create_user(db, payload)
+    existing = crud.get_user_by_email(db, payload.email)
+    if existing:
+        membership = crud.get_workspace_membership(db, context.workspace.id, existing.id)
+        if membership:
+            raise HTTPException(status_code=400, detail="User already exists in this workspace.")
+        membership = models.WorkspaceMembership(
+            workspace_id=context.workspace.id,
+            user_id=existing.id,
+            role=payload.role,
+            is_active=payload.is_active,
+            is_default=False,
+        )
+        db.add(membership)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    return crud.create_user(db, payload, workspace_id=context.workspace.id)
 
 
 @app.put("/auth/users/{user_id}", response_model=schemas.UserOut)
-def update_user(user_id: int, payload: schemas.UserUpdate, db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
+def update_user(
+    user_id: int,
+    payload: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner"])),
+    context=Depends(require_workspace_context),
+):
     target = crud.get_user(db, user_id)
     if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    membership = crud.get_workspace_membership(db, context.workspace.id, user_id)
+    if not membership:
         raise HTTPException(status_code=404, detail="User not found")
     if payload.password and not password_meets_policy(payload.password):
         raise HTTPException(status_code=400, detail="Password does not meet requirements.")
@@ -442,11 +871,24 @@ def update_user(user_id: int, payload: schemas.UserUpdate, db: Session = Depends
 
 
 @app.delete("/auth/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(require_role(["owner"]))):
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(["owner"])),
+    context=Depends(require_workspace_context),
+):
     target = crud.get_user(db, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    crud.delete_user(db, target)
+    membership = crud.get_workspace_membership(db, context.workspace.id, user_id)
+    if not membership:
+        raise HTTPException(status_code=404, detail="User not found")
+    crud.delete_workspace_membership(db, membership)
+    remaining = db.query(models.WorkspaceMembership).filter(models.WorkspaceMembership.user_id == user_id).count()
+    if remaining == 0:
+        target = crud.get_user(db, user_id)
+        if target:
+            crud.delete_user(db, target)
     return {"status": "deleted"}
 
 

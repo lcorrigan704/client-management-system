@@ -25,6 +25,12 @@ import {
 
 export function AppSidebar({
   companyName,
+  workspaces,
+  activeWorkspace,
+  onSwitchWorkspace,
+  onCreateWorkspace,
+  onSetDefaultWorkspace,
+  onUpdateWorkspace,
   navGroups,
   view,
   setView,
@@ -39,14 +45,26 @@ export function AppSidebar({
   ...props
 }) {
   const teams = React.useMemo(
-    () => [
-      {
-        name: companyName || "Workspace",
+    () => {
+      const mapped = (workspaces || []).map((membership) => ({
+        id: membership.workspace.id,
+        name: membership.workspace.name || companyName || "Workspace",
         logo: Building2,
-        plan: "Workspace",
-      },
-    ],
-    [companyName]
+        plan: membership.role || "Workspace",
+        isDefault: Boolean(membership.is_default),
+      }));
+      if (mapped.length) return mapped;
+      return [
+        {
+          id: 0,
+          name: companyName || "Workspace",
+          logo: Building2,
+          plan: "Workspace",
+          isDefault: true,
+        },
+      ];
+    },
+    [companyName, workspaces]
   );
 
   const iconMap = {
@@ -67,7 +85,14 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
-        <TeamSwitcher teams={teams} />
+        <TeamSwitcher
+          teams={teams}
+          activeTeamId={activeWorkspace?.id}
+          onTeamSwitch={onSwitchWorkspace}
+          onCreateTeam={onCreateWorkspace}
+          onSetDefaultTeam={onSetDefaultWorkspace}
+          onUpdateTeam={onUpdateWorkspace}
+        />
         <div className={isCollapsed ? "pb-2" : "px-2 pb-2"}>
           <Select value={selectedYear} onValueChange={setSelectedYear}>
             {isCollapsed ? (

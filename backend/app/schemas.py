@@ -928,9 +928,63 @@ class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class WorkspaceOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkspaceMembershipOut(BaseModel):
+    id: int
+    workspace_id: int
+    user_id: int
+    role: str
+    is_default: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    workspace: WorkspaceOut
+    user: UserOut
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    set_default: bool = True
+
+
+class WorkspaceUpdate(BaseModel):
+    name: str | None = None
+    is_active: bool | None = None
+
+
+class WorkspaceMembershipUpdate(BaseModel):
+    role: Literal["owner", "admin", "user"] | None = None
+    is_active: bool | None = None
+    is_default: bool | None = None
+
+
+class WorkspaceSwitchRequest(BaseModel):
+    workspace_id: int
+
+
+class WorkspaceSwitchResponse(BaseModel):
+    active_workspace: WorkspaceOut
+    membership_role: str
+
+
 class AuthStatus(BaseModel):
     needs_setup: bool
     user: Optional[UserOut] = None
+    active_workspace: WorkspaceOut | None = None
+    workspace_role: str | None = None
+    workspaces: list[WorkspaceMembershipOut] = []
 
 
 class EmailDraftResponse(BaseModel):
@@ -945,10 +999,16 @@ class EmailDraftResponse(BaseModel):
 class BackupRequest(BaseModel):
     download: bool = True
     store: bool = True
+    scope: Literal["workspace", "tenant"] = "workspace"
 
 
 class RestoreRequest(BaseModel):
     filename: str
+    workspace_name: str = Field(min_length=1, max_length=200)
+
+
+class ResetWorkspaceRequest(BaseModel):
+    workspace_name_confirm: str = Field(min_length=1, max_length=200)
 
 
 class SettingsBase(BaseModel):

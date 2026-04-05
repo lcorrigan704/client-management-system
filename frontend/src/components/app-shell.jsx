@@ -4,6 +4,12 @@ import { Toaster } from "@/components/ui/sonner";
 
 export default function AppShell({
   companyName,
+  workspaces,
+  activeWorkspace,
+  onSwitchWorkspace,
+  onCreateWorkspace,
+  onSetDefaultWorkspace,
+  onUpdateWorkspace,
   navGroups,
   view,
   navigateTo,
@@ -23,6 +29,12 @@ export default function AppShell({
         <Toaster position="top-right" theme="system" richColors />
         <AppSidebar
           companyName={companyName}
+          workspaces={workspaces}
+          activeWorkspace={activeWorkspace}
+          onSwitchWorkspace={onSwitchWorkspace}
+          onCreateWorkspace={onCreateWorkspace}
+          onSetDefaultWorkspace={onSetDefaultWorkspace}
+          onUpdateWorkspace={onUpdateWorkspace}
           navGroups={navGroups}
           view={view}
           setView={navigateTo}
@@ -46,4 +58,3 @@ export default function AppShell({
     </SidebarProvider>
   );
 }
-
